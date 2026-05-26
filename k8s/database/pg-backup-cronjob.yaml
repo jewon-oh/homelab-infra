@@ -1,0 +1,117 @@
+# PostgreSQL 백업 CronJob (database 네임스페이스 — 공용 DB)
+# 매일 UTC 03:00에 pg_dump 실행, SeaweedFS S3로 업로드
+# 최근 7일치 보관, 여러 앱이 의존하는 핵심 DB
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: database
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          initContainers:
+            - name: pg-dump
+              image: postgres:16-alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  echo "[Backup] pg_dump 시작..."
+                  pg_dump -h postgres.database.svc.cluster.local -U bot -d app_db \
+                    | gzip > /backup/dump.sql.gz
+
+                  if [ $? -eq 0 ]; then
+                    echo "[Backup] 덤프 성공: $(du -h /backup/dump.sql.gz | cut -f1)"
+                  else
+                    echo "[Backup] 덤프 실패!"
+                    exit 1
+                  fi
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: database-secret
+                      key: DB_PASSWORD
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 256Mi
+              volumeMounts:
+                - name: tmp-backup
+                  mountPath: /backup
+          containers:
+            - name: s3-upload
+              image: amazon/aws-cli:2.27.31
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  S3_ENDPOINT="http://192.168.1.11:30304"
+                  S3_BUCKET="k8s-backups"
+                  BACKUP_NAME="postgres/database_$(date +%Y%m%d_%H%M%S).sql.gz"
+                  RETENTION_DAYS=7
+
+                  # 버킷 없으면 생성
+                  aws s3 mb "s3://${S3_BUCKET}" --endpoint-url "${S3_ENDPOINT}" 2>/dev/null || true
+
+                  echo "[Backup] S3 업로드: s3://${S3_BUCKET}/${BACKUP_NAME}"
+                  aws s3 cp /backup/dump.sql.gz "s3://${S3_BUCKET}/${BACKUP_NAME}" --endpoint-url "${S3_ENDPOINT}"
+
+                  if [ $? -eq 0 ]; then
+                    echo "[Backup] 업로드 성공"
+                  else
+                    echo "[Backup] 업로드 실패!"
+                    exit 1
+                  fi
+
+                  # 오래된 백업 삭제 (7일 이전)
+                  echo "[Backup] ${RETENTION_DAYS}일 이전 백업 삭제..."
+                  CUTOFF=$(date -d "-${RETENTION_DAYS} days" +%Y%m%d_%H%M%S)
+                  aws s3 ls "s3://${S3_BUCKET}/postgres/" --endpoint-url "${S3_ENDPOINT}" \
+                    | awk '{print $4}' \
+                    | while read -r file; do
+                        FILE_DATE=$(echo "${file}" | sed 's/database_\(.*\)\.sql\.gz/\1/')
+                        if [ "${FILE_DATE}" \< "${CUTOFF}" ]; then
+                          echo "[Backup] 삭제: ${file}"
+                          aws s3 rm "s3://${S3_BUCKET}/postgres/${file}" --endpoint-url "${S3_ENDPOINT}"
+                        fi
+                      done
+
+                  echo "[Backup] 현재 백업 목록:"
+                  aws s3 ls "s3://${S3_BUCKET}/postgres/" --endpoint-url "${S3_ENDPOINT}" || echo "(없음)"
+              env:
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: s3-backup-secret
+                      key: AWS_ACCESS_KEY_ID
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: s3-backup-secret
+                      key: AWS_SECRET_ACCESS_KEY
+                - name: AWS_DEFAULT_REGION
+                  value: "local"
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 256Mi
+              volumeMounts:
+                - name: tmp-backup
+                  mountPath: /backup
+          volumes:
+            - name: tmp-backup
+              emptyDir: {}
+          restartPolicy: OnFailure

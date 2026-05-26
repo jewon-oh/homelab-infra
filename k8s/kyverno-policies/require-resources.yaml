@@ -1,0 +1,50 @@
+# 모든 컨테이너에 resources.requests / limits 기재 강제 (#52)
+#
+# 초기 Audit 모드 — 위반 시 admission 거절 X, audit log + report. 30일 안정 후
+# Enforce 전환 권장.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-resources
+  annotations:
+    policies.kyverno.io/title: Require Resources
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: |
+      모든 컨테이너에 resources.requests/limits 기재 강제. LimitRange 가 default 채워주지만
+      명시적 선언이 운영 가시성에 더 좋음.
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: validate-resources
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              operations: [CREATE, UPDATE]
+      exclude:
+        any:
+          # 시스템 ns 는 제외 — 변경 권한이 없음
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+      validate:
+        message: "container {{ element.name }} 에 resources.requests + limits 가 모두 필요"
+        foreach:
+          - list: request.object.spec.containers
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.resources.requests.cpu || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.resources.requests.memory || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.resources.limits.memory || '' }}"
+                    operator: Equals
+                    value: ""

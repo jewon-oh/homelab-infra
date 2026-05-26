@@ -1,0 +1,67 @@
+# K3s 공통 설정 롤 — 모든 K3s 노드에 적용
+# Terraform Cloud-Init은 jw 사용자 + SSH 키만 생성
+# 나머지 OS 설정은 이 롤이 담당
+---
+- name: 호스트네임 하이픈(-) 연결로 설정
+  hostname:
+    name: "{{ inventory_hostname | replace('_', '-') }}"
+
+- name: 호스트네임을 /etc/hosts에 등록 (루프백)
+  lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1'
+    line: "127.0.1.1 {{ inventory_hostname | replace('_', '-') }}"
+
+- name: 시스템 업데이트
+  apt:
+    update_cache: true
+    upgrade: safe
+
+- name: 필수 패키지 설치 (공통)
+  apt:
+    name:
+      - sudo
+      - curl
+      - ca-certificates
+    state: present
+
+- name: qemu-guest-agent 설치 (VM 전용)
+  apt:
+    name: qemu-guest-agent
+    state: present
+  when: "'k3s_workers_baremetal' not in group_names"
+
+- name: jw 사용자를 sudo 그룹에 추가
+  user:
+    name: "{{ ansible_user }}"
+    groups: sudo
+    append: true
+
+- name: sudo 비밀번호 없이 사용 허용
+  lineinfile:
+    path: /etc/sudoers.d/{{ ansible_user }}
+    line: "{{ ansible_user }} ALL=(ALL) NOPASSWD:ALL"
+    create: true
+    mode: "0440"
+    validate: "visudo -cf %s"
+
+- name: qemu-guest-agent 활성화 (VM 전용)
+  systemd:
+    name: qemu-guest-agent
+    state: started
+    enabled: true
+  when: "'k3s_workers_baremetal' not in group_names"
+
+- name: SSH 보안 강화 — root 로그인 비활성화
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "^#?PermitRootLogin"
+    line: "PermitRootLogin no"
+  notify: sshd 재시작
+
+- name: SSH 보안 강화 — 비밀번호 인증 비활성화
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "^#?PasswordAuthentication"
+    line: "PasswordAuthentication no"
+  notify: sshd 재시작

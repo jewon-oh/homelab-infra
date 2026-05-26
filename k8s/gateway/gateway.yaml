@@ -1,0 +1,93 @@
+---
+# external-gateway: 외부 공개 서비스 전담 (vaultwarden.fresh96jwjw.org)
+# Cilium IPAM: 192.168.4.80 — OPNsense NAT 대상 IP
+# NOTE: addresses 필드를 제거함. Envoy Gateway가 addresses를 보고 서비스에
+#       externalIPs를 설정하면 Cilium이 ExternalIPs 타입으로 처리하여
+#       pod→VIP 크로스 노드 SNAT이 안 됨. io.cilium/lb-ipam-ips만으로 충분.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: external-gateway
+  namespace: default
+  annotations:
+    io.cilium/lb-ipam-ips: 192.168.4.80
+spec:
+  gatewayClassName: envoy-gateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: homelab-tls
+            namespace: default
+      allowedRoutes:
+        namespaces:
+          from: All
+---
+# internal-gateway: LAN 내부 전용 (*.local.fresh96jwjw.org 전체)
+# Cilium IPAM: 192.168.4.84
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: internal-gateway
+  namespace: default
+  annotations:
+    io.cilium/lb-ipam-ips: 192.168.4.84
+spec:
+  gatewayClassName: envoy-gateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: homelab-tls
+            namespace: default
+      allowedRoutes:
+        namespaces:
+          from: All
+---
+# homelab-gateway: Admin, n8n 등 관리자 전용
+# Cilium IPAM: 192.168.4.85
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: homelab-gateway
+  namespace: default
+  annotations:
+    io.cilium/lb-ipam-ips: 192.168.4.85
+spec:
+  gatewayClassName: envoy-gateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: homelab-tls
+            namespace: default
+      allowedRoutes:
+        namespaces:
+          from: All

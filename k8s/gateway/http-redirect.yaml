@@ -1,0 +1,39 @@
+# HTTP → HTTPS \uc804\uc5ed \ub9ac\ub2e4\uc774\ub809\ud2b8
+# \ubaa8\ub4e0 \ub3c4\uba54\uc778\uc758 HTTP(80) \uc694\uccad\uc744 HTTPS(443)\ub85c 301 \ub9ac\ub2e4\uc774\ub809\ud2b8
+---
+# \uc678\ubd80 \uac8c\uc774\ud2b8\uc6e8\uc774 HTTP redirect
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: http-to-https-redirect-external
+  namespace: default
+spec:
+  parentRefs:
+    - name: external-gateway
+      namespace: default
+      sectionName: http
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+---
+# \ub0b4\ubd80 \uac8c\uc774\ud2b8\uc6e8\uc774 HTTP redirect
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: http-to-https-redirect-internal
+  namespace: default
+spec:
+  parentRefs:
+    - name: internal-gateway
+      namespace: default
+      sectionName: http
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+

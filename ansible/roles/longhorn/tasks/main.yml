@@ -1,0 +1,146 @@
+# Longhorn 분산 스토리지 설치 (v1.9.1)
+# kubectl apply 방식, default StorageClass로 설정
+# 사전 조건: 모든 worker에 open-iscsi, nfs-common 설치 완료
+---
+
+# ── 1. 환경 사전 검증 ──
+- name: Longhorn 환경 검증 스크립트 실행
+  shell: >
+    curl -sSfL https://raw.githubusercontent.com/longhorn/longhorn/v1.9.1/scripts/environment_check.sh | bash
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: longhorn_check
+  changed_when: false
+  failed_when: false
+
+- name: Longhorn 환경 검증 결과 출력
+  debug:
+    msg: "{{ longhorn_check.stdout_lines | default([]) }}"
+
+# ── 2. Longhorn 설치 ──
+- name: Longhorn v1.9.1 매니페스트 적용
+  command: >
+    kubectl apply -f https://raw.githubusercontent.com/longhorn/longhorn/v1.9.1/deploy/longhorn.yaml
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: Longhorn 배포 대기 (longhorn-manager DaemonSet)
+  command: >
+    kubectl rollout status daemonset/longhorn-manager -n longhorn-system --timeout=300s
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  retries: 3
+  delay: 15
+  register: longhorn_ds
+  until: longhorn_ds.rc == 0
+
+- name: Longhorn driver-deployer 배포 대기
+  command: >
+    kubectl wait --for=condition=available --timeout=300s
+    deployment/longhorn-driver-deployer -n longhorn-system
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  retries: 3
+  delay: 15
+  register: longhorn_driver
+  until: longhorn_driver.rc == 0
+
+- name: Longhorn UI 배포 대기
+  command: >
+    kubectl wait --for=condition=available --timeout=300s
+    deployment/longhorn-ui -n longhorn-system
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  retries: 3
+  delay: 10
+  register: longhorn_ui
+  until: longhorn_ui.rc == 0
+
+# ── 3. default StorageClass 설정 ──
+- name: 기존 default StorageClass 해제 (local-path)
+  command: >
+    kubectl patch storageclass local-path
+    -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  failed_when: false
+
+- name: Longhorn을 default StorageClass로 설정
+  command: >
+    kubectl patch storageclass longhorn
+    -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+# ── 3.5. 홈랩 커스터마이징 ──
+# 홈랩 정책:
+#   1) replica 3은 가용 노드 수 대비 과하므로 2로 통일
+#      (system default-replica-count=2와 일치)
+#   2) reclaimPolicy를 Retain으로 변경
+#      → PVC 실수 삭제 / SC 마이그레이션 사고 시 데이터 보존
+#      → 잉여 PV는 수동 정리 필요 (안전 vs 자동 회수의 트레이드오프)
+#
+# ConfigMap source 수정 후 SC 삭제하면 Longhorn manager가
+# cm 기준으로 자동 재생성. SC parameter/reclaimPolicy는 immutable이라
+# 직접 patch 불가능 → 재생성 패턴.
+- name: longhorn-storageclass ConfigMap 홈랩 정책 적용 (replica=2, reclaim=Retain)
+  shell: |
+    kubectl -n longhorn-system get cm longhorn-storageclass -o yaml | \
+      sed -e 's/numberOfReplicas: "3"/numberOfReplicas: "2"/' \
+          -e 's/reclaimPolicy: "Delete"/reclaimPolicy: "Retain"/' | \
+      kubectl apply -f -
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  changed_when: false
+
+- name: 기존 SC 삭제하여 Longhorn manager가 cm 기준으로 재생성하도록 트리거
+  command: kubectl delete storageclass longhorn --ignore-not-found
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: SC 재생성 대기 (numberOfReplicas=2 + reclaimPolicy=Retain 확인)
+  shell: >
+    kubectl get sc longhorn -o jsonpath='{.parameters.numberOfReplicas}-{.reclaimPolicy}'
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: sc_check
+  retries: 12
+  delay: 5
+  until: sc_check.stdout == "2-Retain"
+  changed_when: false
+
+# ── 4. 설치 확인 ──
+- name: StorageClass 확인
+  command: kubectl get storageclass
+  register: sc_status
+  changed_when: false
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: StorageClass 출력
+  debug:
+    msg: "{{ sc_status.stdout_lines }}"
+
+- name: Longhorn Pod 상태 확인
+  shell: kubectl get pods -n longhorn-system --no-headers | head -20
+  register: longhorn_pods
+  changed_when: false
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: Longhorn Pod 출력
+  debug:
+    msg: "{{ longhorn_pods.stdout_lines }}"
+
+- name: Longhorn 설치 완료 메시지
+  debug:
+    msg: |
+      ========================================
+      Longhorn v1.9.1 설치 완료!
+
+      StorageClass: longhorn (default)
+        - numberOfReplicas: 2
+        - reclaimPolicy: Retain (홈랩 정책)
+      UI: kubectl port-forward -n longhorn-system svc/longhorn-frontend 8080:80
+         → http://localhost:8080
+      ========================================

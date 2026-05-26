@@ -1,0 +1,233 @@
+kube-prometheus-stack:
+  ## K3s 환경 부적합 컴포넌트 비활성화.
+  ## K3s는 kube-controller-manager/scheduler/kube-proxy를 단일 k3s 바이너리에
+  ## 통합하고 ServiceMonitor 대상 pod가 없어 항상 Down으로 오판됨.
+  ## Cilium kubeProxyReplacement=true 환경에서 kube-proxy 자체 부재.
+  ## NOTE: defaultRules.disabled.* 는 알럿만 끄고 빈 rules PrometheusRule 을 남겨
+  ##       CRD validation 을 실패시키므로, 컴포넌트 자체를 enabled:false 로 둔다.
+  kubeControllerManager:
+    enabled: false
+  kubeScheduler:
+    enabled: false
+  kubeProxy:
+    enabled: false
+
+  ## Do not use Helm's ingress, we will provide an HTTPRoute separately.
+  grafana:
+    ingress:
+      enabled: false
+    persistence:
+      type: pvc
+      enabled: true
+      storageClassName: longhorn
+      accessModes:
+        - ReadWriteOnce
+      size: 2Gi
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/ops
+                  operator: Exists
+
+    ## Loki / Tempo datasource 자동 프로비저닝
+    additionalDataSources:
+      - name: Loki
+        type: loki
+        url: http://observability-loki:3100
+        access: proxy
+        isDefault: false
+        jsonData:
+          maxLines: 1000
+      - name: Tempo
+        type: tempo
+        url: http://observability-tempo:3100
+        access: proxy
+        isDefault: false
+        jsonData:
+          httpMethod: GET
+          tracesToLogs:
+            datasourceUid: loki
+            filterByTraceID: true
+
+  ## Alertmanager Telegram 알림 채널
+  ## Bot Token / Chat ID 는 alertmanager-secret 시크릿에서 주입
+  alertmanager:
+    alertmanagerSpec:
+      ## k8s/secrets/alertmanager-secret.yaml 을 수동으로 먼저 적용해야 함
+      configSecret: alertmanager-secret
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/ops
+                    operator: Exists
+
+  ## cadvisor/kubelet 고카디널리티 메트릭 드롭 (시리즈 ~40% 감소)
+  kubelet:
+    serviceMonitor:
+      metricRelabelings:
+        # 거의 사용하지 않는 cadvisor 메트릭 제거
+        - sourceLabels: [__name__]
+          regex: 'container_(blkio|tasks|memory_failures|cpu_load_average|memory_mapped_file|memory_swap|file_descriptors|threads|threads_max|ulimits_soft).*'
+          action: drop
+        # machine_* 메트릭 (노드 레벨과 중복)
+        - sourceLabels: [__name__]
+          regex: 'machine_(cpu|memory|nvm)_.*'
+          action: drop
+
+  ## apiserver 히스토그램 bucket 고카디널리티 메트릭 드롭
+  kubeApiServer:
+    serviceMonitor:
+      metricRelabelings:
+        - sourceLabels: [__name__]
+          regex: 'apiserver_request_sli_duration_seconds_bucket|apiserver_request_body_size_bytes_bucket|apiserver_response_body_size_bytes_bucket'
+          action: drop
+        # deprecated/unused apiserver 메트릭 제거
+        - sourceLabels: [__name__]
+          regex: 'apiserver_(admission|audit|envelope|storage_data_key|watch_cache)_.*'
+          action: drop
+
+  prometheus-node-exporter:
+    tolerations:
+      - key: "amd.com/gpu"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+
+  prometheusOperator:
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/ops
+                  operator: Exists
+
+  kube-state-metrics:
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/ops
+                  operator: Exists
+
+  prometheus:
+    prometheusSpec:
+      retention: 7d
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/ops
+                    operator: Exists
+      resources:
+        requests:
+          memory: 2Gi
+          cpu: 500m
+        limits:
+          memory: 4Gi
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: longhorn
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 30Gi
+      additionalScrapeConfigs:
+        - job_name: 'pve-wtrpro'
+          static_configs:
+            - targets: ['pve-exporter.observability.svc.cluster.local:9221']
+          metrics_path: /pve
+          params:
+            module: [default]
+            cluster: ['1']
+            node: ['1']
+            target: ['192.168.1.114']
+        - job_name: 'opnsense'
+          static_configs:
+            - targets: ['192.168.1.1:9100']
+        - job_name: 'telegraf'
+          static_configs:
+            - targets: ['192.168.1.1:9273']
+        - job_name: 'crowdsec'
+          static_configs:
+            - targets: ['192.168.1.1:6060']
+        - job_name: 'truenas-exporter'
+          scrape_interval: 15s
+          static_configs:
+            - targets: ['truenas-exporter.observability.svc.cluster.local:9108']
+# loki-stack bundles loki and promtail
+loki-stack:
+  loki:
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/ops
+                  operator: Exists
+    persistence:
+      enabled: true
+      storageClassName: longhorn
+      accessModes:
+        - ReadWriteOnce
+      size: 10Gi
+    config:
+      table_manager:
+        retention_deletes_enabled: true
+        retention_period: 30d
+
+  promtail:
+    enabled: true
+    tolerations:
+      - key: "amd.com/gpu"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+    extraPorts:
+      syslog:
+        name: syslog
+        containerPort: 1514
+        protocol: UDP
+        hostPort: 1514
+    config:
+      clients:
+        - url: http://observability-loki:3100/loki/api/v1/push
+      snippets:
+        pipelineStages:
+          - match:
+              selector: '{namespace=~"longhorn-system|kube-system"}'
+              stages:
+                - drop:
+                    expression: '(?i).*(level=info|level=debug|"level":"info"|"level":"debug"|"severity":"info"|"severity":"debug").*'
+        extraScrapeConfigs: |
+          - job_name: syslog
+            syslog:
+              listen_address: 0.0.0.0:1514
+              idle_timeout: 12h
+              labels:
+                job: "opnsense_syslog"
+              listen_protocol: udp
+
+tempo:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node-role.kubernetes.io/ops
+                operator: Exists
+  securityContext:
+    fsGroup: 10001
+  persistence:
+    enabled: true
+    storageClass: longhorn
+    accessModes:
+      - ReadWriteOnce
+    size: 5Gi

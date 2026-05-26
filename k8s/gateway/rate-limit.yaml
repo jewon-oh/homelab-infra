@@ -1,0 +1,27 @@
+# external-gateway 전체에 걸리는 로컬 rate limit
+#
+# 주의: type: Local 이고 client identifier(clientCIDR/headers)가 없어
+# 모든 클라이언트 트래픽이 한 카운터에 합산됩니다.
+# 추후 per-IP 격리가 필요하면 type: Global + Envoy ratelimit service + Redis로 전환 필요.
+#
+# 한도 산정:
+#   - Bitwarden 데스크톱/모바일 로그인 1회 burst: ~25 req/s (config, prelogin, token, sync, profile, attachments...)
+#   - Envoy Pod 1개당 200 req/s = 12,000 req/min → 일반 사용 + DDoS 완충 충분
+#   - 과거 20 req/s는 Bitwarden 클라이언트의 burst를 잘라 KDF config error 유발
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: rate-limit-external
+  namespace: default
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: external-gateway
+  rateLimit:
+    type: Local
+    local:
+      rules:
+        - limit:
+            requests: 200
+            unit: Second

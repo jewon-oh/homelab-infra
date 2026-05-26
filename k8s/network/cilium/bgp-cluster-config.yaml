@@ -1,0 +1,19 @@
+# Cilium BGP Cluster Config (신형 API, v2alpha1 for 1.16~1.17)
+# 모든 Linux 노드에서 OPNsense(192.168.4.1)와 iBGP 피어링
+apiVersion: cilium.io/v2alpha1
+kind: CiliumBGPClusterConfig
+metadata:
+  name: cilium-bgp
+spec:
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/os: linux
+  bgpInstances:
+    - name: "homelab"
+      localASN: 65551
+      peers:
+        - name: "opnsense"
+          peerASN: 65551
+          peerAddress: "192.168.4.1"
+          peerConfigRef:
+            name: "opnsense-peer"

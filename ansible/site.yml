@@ -1,0 +1,50 @@
+# 홈랩 인프라 메인 Playbook
+# K3s HA 클러스터 (Techno Tim k3s-ansible 스타일)
+# 실행: ansible-playbook site.yml --tags k3s
+---
+
+# ═══════════════════════════════════════
+# K3s HA 클러스터
+# ═══════════════════════════════════════
+- name: K3s 공통 설정 (sudo, 패키지, 보안)
+  hosts: k3s
+  become: true
+  tags: [k3s, k3s-common]
+  roles:
+    - k3s_common
+
+- name: K3s Server — 첫 번째 노드 초기화 (embedded etcd + kube-vip)
+  hosts: k3s_server
+  become: true
+  tags: [k3s, k3s-server]
+  serial: 1                           # 순차 실행 (init → join 순서 보장)
+  roles:
+    - k3s_server
+
+- name: K3s Worker 조인 (공용 - VM 및 베어메탈)
+  hosts: k3s_workers:k3s_workers_baremetal
+  become: true
+  tags: [k3s, k3s-worker]
+  roles:
+    - k3s_worker
+
+- name: Longhorn 분산 스토리지 설치
+  hosts: k3s_server[0]
+  become: true
+  tags: [k3s, longhorn]
+  roles:
+    - longhorn
+
+- name: Envoy Gateway (Gateway API)
+  hosts: k3s_server[0]
+  become: true
+  tags: [k3s, envoy-gateway]
+  roles:
+    - envoy_gateway
+
+- name: ArgoCD 설치
+  hosts: k3s_server[0]
+  become: true
+  tags: [k3s, argocd]
+  roles:
+    - argocd

@@ -1,0 +1,180 @@
+# K3s Server 설치 역할 — HA embedded etcd + kube-vip
+# 첫 번째 노드(k3s_role=init): --cluster-init으로 etcd 초기화
+# 나머지 노드(k3s_role=join): --server로 기존 클러스터에 조인
+#
+# Techno Tim k3s-ansible 스타일
+# https://github.com/techno-tim/k3s-ansible
+---
+
+# ── 1. Longhorn 의존성 패키지 설치 ──
+- name: Longhorn 의존성 패키지 설치
+  apt:
+    name:
+      - open-iscsi
+      - nfs-common
+      - util-linux
+    state: present
+
+- name: iscsid 서비스 활성화 (Longhorn용)
+  systemd:
+    name: iscsid
+    state: started
+    enabled: true
+
+# ── 2. K3s 설정 디렉토리 ──
+- name: K3s 설정 디렉토리 생성
+  file:
+    path: /etc/rancher/k3s
+    state: directory
+    mode: "0755"
+
+# ── 3. K3s config.yaml 생성 ──
+- name: K3s config.yaml 작성
+  template:
+    src: config.yaml.j2
+    dest: /etc/rancher/k3s/config.yaml
+    mode: "0644"
+
+# ── 4. kube-vip RBAC + DaemonSet 매니페스트 준비 ──
+- name: K3s manifests 디렉토리 생성
+  file:
+    path: /var/lib/rancher/k3s/server/manifests
+    state: directory
+    mode: "0755"
+    recurse: true
+
+- name: kube-vip RBAC 매니페스트 배포
+  template:
+    src: kube-vip-rbac.yaml.j2
+    dest: /var/lib/rancher/k3s/server/manifests/kube-vip-rbac.yaml
+    mode: "0644"
+
+- name: kube-vip DaemonSet 매니페스트 배포
+  template:
+    src: kube-vip-daemonset.yaml.j2
+    dest: /var/lib/rancher/k3s/server/manifests/kube-vip-daemonset.yaml
+    mode: "0644"
+
+# k8s/network/cilium/cilium.yaml을 단일 출처(Single Source of Truth)로 사용.
+# template을 별도 유지하면 k8s 디렉토리와 drift가 발생해 Addon 컨트롤러가
+# 구버전으로 원복하는 사고(2026-04-24)가 재발하므로 git 파일을 그대로 복사.
+# 값이 inventory 변수(k3s_vip, k3s_cluster_cidr)와 일치해야 하므로 k8s 파일
+# 수정 시 해당 값들이 여전히 매치되는지 확인 필요.
+- name: Cilium CNI HelmChart 매니페스트 배포 (git 파일 단일 출처)
+  copy:
+    src: "{{ playbook_dir }}/../k8s/network/cilium/cilium.yaml"
+    dest: /var/lib/rancher/k3s/server/manifests/cilium.yaml
+    mode: "0644"
+
+# ── 5. 첫 번째 서버: 클러스터 초기화 ──
+- name: K3s 첫 번째 서버 설치 (cluster-init)
+  shell: >
+    curl -sfL https://get.k3s.io |
+    INSTALL_K3S_VERSION="{{ k3s_version }}"
+    sh -s - server --cluster-init
+  args:
+    creates: /usr/local/bin/k3s
+  when: k3s_role == "init"
+
+- name: K3s 서비스 시작 대기 (init)
+  wait_for:
+    path: /var/lib/rancher/k3s/server/node-token
+    timeout: 120
+  when: k3s_role == "init"
+
+- name: K3s API 서버 Ready 대기 (init)
+  command: kubectl get nodes
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: k3s_ready
+  retries: 30
+  delay: 5
+  until: k3s_ready.rc == 0
+  changed_when: false
+  when: k3s_role == "init"
+
+# ── 6. 나머지 서버: 클러스터 조인 ──
+- name: 첫 번째 서버에서 토큰 가져오기
+  slurp:
+    src: /var/lib/rancher/k3s/server/node-token
+  register: k3s_token_raw
+  delegate_to: "{{ groups['k3s_server'][0] }}"
+  when: k3s_role == "join"
+
+- name: 토큰 파싱
+  set_fact:
+    k3s_token: "{{ k3s_token_raw.content | b64decode | trim }}"
+  when: k3s_role == "join"
+
+- name: K3s 서버 조인 (기존 클러스터에 합류)
+  shell: >
+    curl -sfL https://get.k3s.io |
+    INSTALL_K3S_VERSION="{{ k3s_version }}"
+    K3S_TOKEN="{{ k3s_token }}"
+    sh -s - server --server https://{{ k3s_vip }}:6443
+  args:
+    creates: /usr/local/bin/k3s
+  when: k3s_role == "join"
+
+- name: K3s 서비스 시작 대기 (join)
+  wait_for:
+    path: /var/lib/rancher/k3s/server/node-token
+    timeout: 120
+  when: k3s_role == "join"
+
+# ── 7. 공통 설정 ──
+- name: kubectl alias 설정 (root)
+  lineinfile:
+    path: /root/.bashrc
+    line: "{{ item }}"
+    create: true
+  loop:
+    - "alias k=kubectl"
+    - "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml"
+
+- name: kubectl alias 설정 ({{ ansible_user }})
+  lineinfile:
+    path: "/home/{{ ansible_user }}/.bashrc"
+    line: "{{ item }}"
+    create: true
+  loop:
+    - "alias k=kubectl"
+    - "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml"
+
+- name: Gitea Container Registry 접근 설정
+  template:
+    src: registries.yaml.j2
+    dest: /etc/rancher/k3s/registries.yaml
+    mode: "0644"
+  notify: K3s 재시작
+
+# ── 8. 클러스터 상태 확인 (init 서버에서만) ──
+- name: K3s 노드 상태 확인
+  command: kubectl get nodes -o wide
+  register: k3s_nodes
+  changed_when: false
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  when: k3s_role == "init"
+
+- name: K3s 노드 출력
+  debug:
+    msg: "{{ k3s_nodes.stdout_lines }}"
+  when: k3s_role == "init"
+
+
+# ── 9. Server 노드에 PreferNoSchedule taint 설정 ──
+# 워크로드가 가능하면 worker 노드에 스케줄링되도록 유도
+# NoSchedule이 아닌 PreferNoSchedule로 설정하여 worker 부족 시 server에도 허용
+- name: Server 노드 PreferNoSchedule taint 설정
+  command: >
+    kubectl taint nodes {{ inventory_hostname }}
+    node-role.kubernetes.io/control-plane:PreferNoSchedule
+    --overwrite
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  changed_when: false
+  when: k3s_role == "init"
+  loop: "{{ groups['k3s_server'] }}"
+  loop_control:
+    loop_var: taint_node

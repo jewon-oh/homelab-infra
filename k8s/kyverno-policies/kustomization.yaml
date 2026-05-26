@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - require-resources.yaml
+  - block-latest-tag.yaml
+  - require-runasnonroot.yaml
+  - require-pdb.yaml
+  - require-networkpolicy.yaml

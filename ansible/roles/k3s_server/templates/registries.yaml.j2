@@ -1,0 +1,8 @@
+mirrors:
+  "{{ gitea_host }}":
+    endpoint:
+      - "{{ gitea_url }}"
+configs:
+  "{{ gitea_host }}":
+    tls:
+      insecure_skip_verify: true

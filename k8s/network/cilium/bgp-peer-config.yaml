@@ -1,0 +1,22 @@
+# Cilium BGP Peer Config — OPNsense 라우터 피어 설정
+apiVersion: cilium.io/v2alpha1
+kind: CiliumBGPPeerConfig
+metadata:
+  name: opnsense-peer
+spec:
+  timers:
+    connectRetryTimeSeconds: 12
+    holdTimeSeconds: 30
+    keepAliveTimeSeconds: 10
+  gracefulRestart:
+    enabled: true
+    # 120 → 30: OPNSense FRR가 간헐적으로 drop되면 Cilium이 stale
+    # established 상태(zombie)를 120초간 유지해 라우트가 복구되지
+    # 않는 현상을 줄이기 위해 축소. data plane에 영향 없음.
+    restartTimeSeconds: 30
+  families:
+    - afi: ipv4
+      safi: unicast
+      advertisements:
+        matchLabels:
+          advertise: "bgp"

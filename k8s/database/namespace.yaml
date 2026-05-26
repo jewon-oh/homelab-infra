@@ -1,0 +1,12 @@
+# Pod Security Admission labels (#54)
+#
+# baseline 만 — postgres/redis 컨테이너가 fsGroup 등 권한 일부 사용. restricted
+# 적용 전 audit/warn 으로 위반 검출.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: database
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

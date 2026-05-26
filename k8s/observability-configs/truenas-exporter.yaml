@@ -1,0 +1,159 @@
+---
+# Graphite mapping rules — converts TrueNAS graphite metric names
+# (e.g. servers.HOST.interface-eth0.if_octets) into Prometheus
+# metric names + labels.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: truenas-graphite-mapping
+  namespace: observability
+data:
+  graphite_mapping.yaml: |
+    mappings:
+      - match: 'servers\.(.*)\.interface-(.*)\.if_(.*)'
+        match_type: regex
+        name: 'truenas_interface_${3}'
+        labels:
+          hostname: ${1}
+          device: ${2}
+      - match: 'servers\.(.*)\.df-(.*)\.(.*)'
+        match_type: regex
+        name: 'truenas_dataset_${3}'
+        labels:
+          hostname: ${1}
+          device: ${2}
+      - match: 'servers\.(.*)\.memory\.(.*)'
+        match_type: regex
+        name: 'truenas_${2}'
+        labels:
+          hostname: ${1}
+      - match: 'servers\.(.*)\.zfs_arc\.(.*)'
+        match_type: regex
+        name: 'truenas_zfs_arc_${2}'
+        labels:
+          hostname: ${1}
+      - match: 'servers\.(.*)\.processes\.(.*)'
+        match_type: regex
+        name: 'truenas_processes_${2}'
+        labels:
+          hostname: ${1}
+      - match: 'servers\.(.*)\.load\.load\.(.*)'
+        match_type: regex
+        name: 'truenas_load_${2}'
+        labels:
+          hostname: ${1}
+      - match: 'servers\.(.*)\.rrdcached\.(.*)'
+        match_type: regex
+        name: 'truenas_rrdcached_${2}'
+        labels:
+          hostname: ${1}
+      - match: 'servers\.(.*)\.swap\.(.*)'
+        match_type: regex
+        name: 'truenas_swap_${2}'
+        labels:
+          hostname: ${1}
+      - match: 'servers\.(.*)\.uptime\.(.*)'
+        match_type: regex
+        name: 'truenas_uptime_${2}'
+        labels:
+          hostname: ${1}
+      - match: 'servers\.(.*)\.disk-(.*)\.(.*)\.(.*)'
+        match_type: regex
+        name: 'truenas_${3}_${4}'
+        labels:
+          hostname: ${1}
+          device: ${2}
+      - match: 'servers\.(.*)\.(.*)-(.*)\.(.*)'
+        match_type: regex
+        name: 'truenas_${2}_${4}'
+        labels:
+          hostname: ${1}
+          device: ${3}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: truenas-exporter
+  namespace: observability
+  labels:
+    app: truenas-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: truenas-exporter
+  template:
+    metadata:
+      labels:
+        app: truenas-exporter
+    spec:
+      containers:
+        - name: exporter
+          image: prom/graphite-exporter:v0.13.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--graphite.mapping-config=/etc/graphite_mapping.yaml"
+          ports:
+            - name: metrics
+              containerPort: 9108
+            - name: graphite-tcp
+              containerPort: 9109
+              protocol: TCP
+          volumeMounts:
+            - name: mapping
+              mountPath: /etc/graphite_mapping.yaml
+              subPath: graphite_mapping.yaml
+              readOnly: true
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: mapping
+          configMap:
+            name: truenas-graphite-mapping
+---
+# Internal Service — Prometheus 스크랩용 (ClusterIP)
+apiVersion: v1
+kind: Service
+metadata:
+  name: truenas-exporter
+  namespace: observability
+  labels:
+    app: truenas-exporter
+spec:
+  selector:
+    app: truenas-exporter
+  ports:
+    - name: metrics
+      port: 9108
+      targetPort: metrics
+---
+# External Service — TrueNAS가 graphite 푸시할 LAN 노출 (LoadBalancer)
+apiVersion: v1
+kind: Service
+metadata:
+  name: truenas-exporter-graphite
+  namespace: observability
+  labels:
+    app: truenas-exporter
+  annotations:
+    io.cilium/lb-ipam-ips: "192.168.4.83"
+spec:
+  type: LoadBalancer
+  selector:
+    app: truenas-exporter
+  ports:
+    - name: graphite-tcp
+      port: 2003
+      targetPort: graphite-tcp
+      protocol: TCP

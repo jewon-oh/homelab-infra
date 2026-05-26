@@ -1,0 +1,112 @@
+# Gitea Actions Runner — K3s StatefulSet
+# gitea/act_runner:latest-dind-rootless 사용 (DinD 내장, sidecar 불필요)
+# 참고: https://namesny.com/blog/gitea_actions_k3s_docker/
+#
+# StatefulSet 사용 이유:
+#   - 각 Pod 별 .runner 등록 정보를 독립 PVC(volumeClaimTemplates)에 영속
+#   - 안정적인 hostname(gitea-runner-0, -1, ...) → Gitea 등록 시 runner 이름 구분
+#   - capacity:1 + 여러 Pod 구조로 노드 간에 빌드 부하 분산
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: gitea-runner
+  namespace: gitea
+  labels:
+    app: gitea-runner
+spec:
+  # ops 노드 4개 중 worker-3 가 lowmem taint(NoSchedule) 라 실질 schedulable 3개.
+  # podAntiAffinity 가 노드당 1개를 강제하므로 4번째는 영구 Pending → 잡 큐 분배
+  # 신뢰성을 위해 3으로 고정. lowmem 해제 또는 추가 ops 노드 투입 시 재상향.
+  replicas: 3
+  serviceName: gitea-runner
+  podManagementPolicy: Parallel
+  # k8s API server 가 채우는 기본값 — 명시해서 argocd OutOfSync 회피
+  revisionHistoryLimit: 10
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app: gitea-runner
+  template:
+    metadata:
+      labels:
+        app: gitea-runner
+    spec:
+      serviceAccountName: gitea-runner
+      securityContext:
+        fsGroup: 1000
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/ops
+                    operator: Exists
+        podAntiAffinity:
+          # 노드당 runner pod 1개로 강제 — 노드 부족 시 잉여 pod는 Pending 유지
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: gitea-runner
+              topologyKey: kubernetes.io/hostname
+      tolerations:
+        - key: "node-role.kubernetes.io/control-plane"
+          operator: "Exists"
+          effect: "PreferNoSchedule"
+        - key: "amd.com/gpu"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+      containers:
+        - name: runner
+          image: gitea/act_runner:0.6.1-dind-rootless
+          env:
+            - name: DOCKER_HOST
+              value: "unix:///var/run/user/1000/docker.sock"
+            - name: GITEA_INSTANCE_URL
+              value: "http://gitea-http.gitea.svc.cluster.local:3000"
+            - name: GITEA_RUNNER_REGISTRATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: gitea-runner-token
+                  key: token
+            - name: GITEA_RUNNER_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CONFIG_FILE
+              value: "/data/config.yaml"
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: runner-data
+              mountPath: /data
+            - name: docker-storage
+              mountPath: /var/lib/docker
+            - name: runner-config
+              mountPath: /data/config.yaml
+              subPath: config.yaml
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+      volumes:
+        - name: docker-storage
+          emptyDir: {}
+        - name: runner-config
+          configMap:
+            name: gitea-runner-config
+  volumeClaimTemplates:
+    - metadata:
+        name: runner-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: longhorn
+        resources:
+          requests:
+            storage: 1Gi

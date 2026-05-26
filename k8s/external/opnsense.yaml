@@ -1,0 +1,29 @@
+﻿apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: opnsense
+  namespace: default
+spec:
+  endpoints:
+    - ip:
+        address: 192.168.1.1
+        port: 8443
+  tls:
+    insecureSkipVerify: true
+    sni: 192.168.1.1
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: opnsense
+  namespace: default
+spec:
+  parentRefs:
+    - name: internal-gateway
+  hostnames:
+    - "opnsense.local.fresh96jwjw.org"
+  rules:
+    - backendRefs:
+        - group: gateway.envoyproxy.io
+          kind: Backend
+          name: opnsense

@@ -1,0 +1,5 @@
+# Gitea on K3s — Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitea

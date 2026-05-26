@@ -1,0 +1,19 @@
+# Cilium BGP Advertisement — LoadBalancer IP 경로 광고
+# labels.advertise=bgp가 PeerConfig의 matchLabels와 매칭돼야 광고됨
+apiVersion: cilium.io/v2alpha1
+kind: CiliumBGPAdvertisement
+metadata:
+  name: homelab-advertisements
+  labels:
+    advertise: bgp
+spec:
+  advertisements:
+    - advertisementType: "Service"
+      service:
+        addresses:
+          - LoadBalancerIP
+      selector:
+        matchExpressions:
+          - key: somekey
+            operator: NotIn
+            values: ["never-used-value"]

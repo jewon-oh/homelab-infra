@@ -1,0 +1,45 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-image-updater
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://argoproj.github.io/argo-helm
+    chart: argocd-image-updater
+    targetRevision: 1.1.5
+    helm:
+      releaseName: argocd-image-updater
+      values: |
+        config:
+          log.level: info
+          git.user: argocd-image-updater
+          git.email: argocd-image-updater@local.fresh96jwjw.org
+          git.commit-message-template: |
+            chore(image-updater): bump {{ .AppName }} images
+
+            {{ range .AppChanges -}}
+            {{ .Image }}: {{ .OldTag }} -> {{ .NewTag }}
+            {{ end -}}
+          registries:
+            - name: Gitea
+              api_url: https://gitea.local.fresh96jwjw.org
+              prefix: gitea.local.fresh96jwjw.org
+              ping: yes
+              credentials: pullsecret:argocd/gitea-registry
+              default: true
+        # nodeSelector 제거 — Image Updater 는 CPU·메모리 가볍고
+        # 노드 의존성 없으므로 스케줄러 자유 배치.
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

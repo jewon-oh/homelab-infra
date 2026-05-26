@@ -1,0 +1,93 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: descheduler
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://kubernetes-sigs.github.io/descheduler/
+    targetRevision: 0.32.2
+    chart: descheduler
+    helm:
+      releaseName: descheduler
+      values: |
+        kind: CronJob
+        schedule: "*/5 * * * *"
+
+        # ops 노드에서만 실행
+        # — 애플리케이션 워크로드가 있는 노드만 rebalance 대상.
+        # control-plane 은 descheduler 의 평가 범위에서 자연스럽게 제외됨
+        # (PreferNoSchedule taint + tolerations 없음).
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: node-role.kubernetes.io/ops
+                      operator: Exists
+
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 256Mi
+
+        # https://github.com/kubernetes-sigs/descheduler#policy-default-evictor
+        deschedulerPolicy:
+          # API 그룹 명시 — chart 기본은 v1alpha2 이며 K8s 1.31 호환.
+          maxNoOfPodsToEvictPerNode: 5
+          maxNoOfPodsToEvictPerNamespace: 5
+          profiles:
+            - name: default
+              pluginConfig:
+                - name: DefaultEvictor
+                  args:
+                    evictLocalStoragePods: false
+                    evictSystemCriticalPods: false
+                    ignorePvcPods: false
+                    nodeFit: true
+                # 노드간 사용량 균형 — 압박 노드 → 한가한 노드 이동
+                - name: LowNodeUtilization
+                  args:
+                    thresholds:
+                      cpu: 40
+                      memory: 40
+                      pods: 30
+                    targetThresholds:
+                      cpu: 70
+                      memory: 70
+                      pods: 60
+                # topologySpreadConstraints 위반 시 evict.
+                # constraints 에 ScheduleAnyway 도 포함 → soft constraint 도 강제
+                # (ScheduleAnyway spread 도 적용 대상). 기본은 DoNotSchedule 만.
+                - name: RemovePodsViolatingTopologySpreadConstraint
+                  args:
+                    constraints:
+                      - DoNotSchedule
+                      - ScheduleAnyway
+                # 같은 deployment 의 여러 replica 가 한 노드에 몰리면 evict
+                - name: RemoveDuplicates
+              plugins:
+                balance:
+                  enabled:
+                    - LowNodeUtilization
+                    - RemovePodsViolatingTopologySpreadConstraint
+                    - RemoveDuplicates
+
+        # 운영 가시성 — prometheus scrape
+        serviceMonitor:
+          enabled: false  # observability-configs 가 별도 wiring, 우선 비활성
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

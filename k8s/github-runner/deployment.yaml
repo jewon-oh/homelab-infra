@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-runner
+  namespace: github-runner
+  labels:
+    app: github-runner
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: github-runner
+  template:
+    metadata:
+      labels:
+        app: github-runner
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/ops
+                    operator: Exists
+      containers:
+      - name: dind
+        image: docker:27-dind
+        securityContext:
+          privileged: true
+        env:
+        - name: DOCKER_TLS_CERTDIR
+          value: ""
+        # CI 변동성 해소 (#65) — 다른 ops 워크로드와 CPU contention 차단.
+        # BuildKit 병렬 컴파일 시 4 CPU + 4Gi 까지 burst 허용.
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: "4"
+            memory: 4Gi
+        volumeMounts:
+        - name: docker-storage
+          mountPath: /var/lib/docker
+      - name: runner
+        image: ubuntu:22.04
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          # Wait for Docker daemon to be ready
+          apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y curl git jq libicu-dev tzdata sudo rsync nodejs docker.io
+          
+          # Create user
+          if ! id -u github_runner > /dev/null 2>&1; then
+            useradd -m -u 1000 -s /bin/bash github_runner
+          fi
+          echo "github_runner ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+          
+          # Ensure ownership
+          chown 1000:1000 /home/github_runner
+          chown -R 1000:1000 /home/github_runner/actions-runner
+          mkdir -p /home/github_runner/.docker/buildx
+          chown -R 1000:1000 /home/github_runner/.docker
+          
+          # Wait for DinD sidecar
+          echo "Waiting for Docker daemon..."
+          until docker info >/dev/null 2>&1; do sleep 2; done
+          echo "Docker is ready!"
+          
+          echo "Starting runner..."
+          su - github_runner -c 'DOCKER_HOST=tcp://localhost:2375 /home/github_runner/actions-runner/run.sh'
+          
+          tail -f /dev/null
+        env:
+        - name: DOCKER_HOST
+          value: tcp://localhost:2375
+        # runner 자체는 가벼움 (job 코디네이션만). 실제 빌드는 dind 컨테이너.
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+        volumeMounts:
+        - name: runner-data
+          mountPath: /home/github_runner/actions-runner
+      volumes:
+      - name: runner-data
+        persistentVolumeClaim:
+          claimName: github-runner-pvc
+      - name: docker-storage
+        emptyDir: {}

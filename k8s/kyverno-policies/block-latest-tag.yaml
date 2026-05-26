@@ -1,0 +1,42 @@
+# :latest 태그 또는 태그 누락 차단 (#52)
+#
+# 재현성 보호. 태그 미명시 = latest = 빌드 시점 의존.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: block-latest-tag
+  annotations:
+    policies.kyverno.io/title: Block Latest Image Tag
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: validate-image-tag
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              operations: [CREATE, UPDATE]
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+      validate:
+        message: ":latest 또는 태그 미명시 image 사용 금지 — 명시적 semver 태그 필수"
+        foreach:
+          - list: request.object.spec.containers
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.image }}"
+                    operator: Equals
+                    value: "*:latest"
+                  - key: "{{ regex_match(':[a-zA-Z0-9._-]+$', element.image) }}"
+                    operator: Equals
+                    value: false

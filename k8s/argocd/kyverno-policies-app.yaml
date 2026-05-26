@@ -1,0 +1,26 @@
+# Kyverno ClusterPolicy 정의 — kyverno chart 와 분리 (#52)
+#
+# 본 App 은 k8s/kyverno-policies/ 디렉터리의 ClusterPolicy 매니페스트만 sync.
+# 정책 자체의 enable/disable 은 매니페스트 단위 toggle 로 통제.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno-policies
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://gitea.local.fresh96jwjw.org/jw/homelab-infra.git
+    targetRevision: main
+    path: k8s/kyverno-policies
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true

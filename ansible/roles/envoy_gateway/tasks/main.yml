@@ -1,0 +1,154 @@
+# Envoy Gateway 설치 (Gateway API 구현체)
+# v1.7.1 — kubectl apply 방식
+# ingress-nginx 대신 Gateway API 사용
+---
+
+# ── 1. Envoy Gateway 설치 ──
+- name: Envoy Gateway v1.7.1 매니페스트 적용
+  command: >
+    kubectl apply --server-side
+    -f https://github.com/envoyproxy/gateway/releases/download/v1.7.1/install.yaml
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: Envoy Gateway 배포 대기
+  command: >
+    kubectl wait --timeout=300s -n envoy-gateway-system
+    deployment/envoy-gateway --for=condition=Available
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  retries: 3
+  delay: 15
+  register: eg_wait
+  until: eg_wait.rc == 0
+
+# ── 2. GatewayClass 생성 ──
+- name: GatewayClass 생성 (Envoy Gateway)
+  copy:
+    dest: /tmp/envoy-gatewayclass.yaml
+    content: |
+      apiVersion: gateway.networking.k8s.io/v1
+      kind: GatewayClass
+      metadata:
+        name: envoy-gateway
+      spec:
+        controllerName: gateway.envoyproxy.io/gatewayclass-controller
+        parametersRef:
+          group: gateway.envoyproxy.io
+          kind: EnvoyProxy
+          name: custom-proxy-config
+          namespace: default
+    mode: "0644"
+
+- name: GatewayClass 적용
+  command: kubectl apply -f /tmp/envoy-gatewayclass.yaml
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+# ── 3. 기본 Gateway 생성 (HTTP + HTTPS) ──
+- name: 기본 Gateway 리소스 생성
+  copy:
+    dest: /tmp/envoy-gateway-default.yaml
+    content: |
+      apiVersion: gateway.networking.k8s.io/v1
+      kind: Gateway
+      metadata:
+        name: homelab-gateway
+        namespace: default
+      spec:
+        gatewayClassName: envoy-gateway
+        listeners:
+          - name: http
+            protocol: HTTP
+            port: 80
+            allowedRoutes:
+              namespaces:
+                from: All
+          - name: https
+            protocol: HTTPS
+            port: 443
+            allowedRoutes:
+              namespaces:
+                from: All
+            tls:
+              mode: Terminate
+              certificateRefs:
+                - kind: Secret
+                  name: homelab-tls
+                  namespace: default
+    mode: "0644"
+
+- name: 기본 Gateway 적용
+  command: kubectl apply -f /tmp/envoy-gateway-default.yaml
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+# ── 4. Gateway 상태 확인 ──
+- name: Envoy Gateway Pod 대기
+  command: >
+    kubectl wait --timeout=120s -n envoy-gateway-system
+    pod -l gateway.envoyproxy.io/owning-gateway-name=homelab-gateway
+    --for=condition=Ready
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  retries: 5
+  delay: 10
+  register: eg_pod_wait
+  until: eg_pod_wait.rc == 0
+  failed_when: false
+
+- name: Gateway 상태 확인
+  shell: kubectl get gateway,gatewayclass -A
+  register: gw_status
+  changed_when: false
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: Gateway 상태 출력
+  debug:
+    msg: "{{ gw_status.stdout_lines }}"
+
+- name: Envoy Proxy Service 확인 (Cilium LB IPAM이 IP 할당)
+  shell: kubectl get svc -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=homelab-gateway
+  register: eg_svc
+  changed_when: false
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: Envoy Proxy Service 출력
+  debug:
+    msg: "{{ eg_svc.stdout_lines }}"
+
+- name: 임시 파일 정리
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/envoy-gatewayclass.yaml
+    - /tmp/envoy-gateway-default.yaml
+
+- name: Envoy Gateway 설치 완료 메시지
+  debug:
+    msg: |
+      ========================================
+      Envoy Gateway v1.7.1 설치 완료!
+
+      GatewayClass: envoy-gateway
+      Gateway: homelab-gateway (HTTP:80, HTTPS:443)
+      Envoy Proxy → Cilium LB IPAM이 IP 할당 (BGP로 OPNsense에 광고)
+
+      HTTPRoute 예시:
+        apiVersion: gateway.networking.k8s.io/v1
+        kind: HTTPRoute
+        metadata:
+          name: my-app
+        spec:
+          parentRefs:
+            - name: homelab-gateway
+          hostnames:
+            - "app.example.com"
+          rules:
+            - backendRefs:
+                - name: my-app-svc
+                  port: 80
+      ========================================

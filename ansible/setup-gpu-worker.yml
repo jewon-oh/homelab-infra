@@ -1,0 +1,37 @@
+---
+# AMD GPU 펌웨어 설치 및 udev 트리거 (Jellyfin hardware acceleration 준비)
+# ansible-playbook ansible/setup-gpu-worker.yml -i 192.168.4.21,
+- name: AMD GPU firmware setup on k3s-worker-1
+  hosts: all
+  become: true
+  tasks:
+    - name: Enable non-free firmware repo
+      ansible.builtin.lineinfile:
+        path: /etc/apt/sources.list
+        regexp: '^deb .*bookworm.*main$'
+        line: 'deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware'
+        backup: yes
+
+    - name: Install AMD GPU firmware
+      ansible.builtin.apt:
+        name:
+          - firmware-amd-graphics
+          - libgl1-mesa-dri
+          - libva-drm2
+          - libva2
+          - vainfo
+        update_cache: yes
+        state: present
+
+    - name: Trigger udev for DRI devices
+      ansible.builtin.command: udevadm trigger --subsystem-match=drm
+      changed_when: false
+
+    - name: Check /dev/dri
+      ansible.builtin.stat:
+        path: /dev/dri/renderD128
+      register: dri_stat
+
+    - name: Report result
+      ansible.builtin.debug:
+        msg: "{{ '/dev/dri/renderD128 EXISTS - GPU ready!' if dri_stat.stat.exists else '/dev/dri/renderD128 NOT FOUND - reboot required' }}"

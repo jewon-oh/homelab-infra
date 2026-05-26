@@ -1,0 +1,203 @@
+# 클러스터 필수 알림 규칙
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: homelab-alerts
+  namespace: observability
+  labels:
+    release: observability
+spec:
+  groups:
+    # --- 노드 수준 알림 ---
+    - name: node.rules
+      rules:
+        - alert: NodeMemoryHigh
+          expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node 메모리 사용률 높음 ({{ $labels.instance }})"
+            description: "Node {{ $labels.instance }} 메모리 사용률: {{ $value | printf \"%.1f\" }}% (85% 초과)"
+
+        - alert: NodeMemoryCritical
+          expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 95
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node 메모리 위기 ({{ $labels.instance }})"
+            description: "Node {{ $labels.instance }} 메모리 사용률: {{ $value | printf \"%.1f\" }}% (95% 초과)"
+
+        # 실제 데이터/이미지 파티션 전체 커버 (worker-3은 /var/lib/rancher/k3s 가 별도 파티션)
+        - alert: NodeDiskSpaceHigh
+          expr: |
+            (1 - (node_filesystem_avail_bytes{fstype=~"ext.|xfs|btrfs"}
+                / node_filesystem_size_bytes{fstype=~"ext.|xfs|btrfs"})) * 100 > 80
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Node 디스크 공간 부족 ({{ $labels.instance }} {{ $labels.mountpoint }})"
+            description: "Node {{ $labels.instance }} 파티션 {{ $labels.mountpoint }} 사용률: {{ $value | printf \"%.1f\" }}%"
+
+        - alert: NodeDiskSpaceCritical
+          expr: |
+            (1 - (node_filesystem_avail_bytes{fstype=~"ext.|xfs|btrfs"}
+                / node_filesystem_size_bytes{fstype=~"ext.|xfs|btrfs"})) * 100 > 90
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node 디스크 위기 ({{ $labels.instance }} {{ $labels.mountpoint }})"
+            description: "Node {{ $labels.instance }} {{ $labels.mountpoint }} {{ $value | printf \"%.1f\" }}% — 즉시 회수 필요"
+
+        # kubelet 이미지 GC 실패는 디스크 압박 직전 증상 — 조기 알림
+        - alert: KubeletImageGCFailing
+          expr: increase(kubelet_image_garbage_collection_errors_total[10m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "kubelet image GC 실패 ({{ $labels.instance }})"
+            description: "{{ $labels.instance }} 의 kubelet이 이미지 GC를 수행하지 못함. 디스크 압박 가능성."
+
+        - alert: NodeDown
+          expr: up{job="node-exporter"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node 응답 없음 ({{ $labels.instance }})"
+            description: "Node {{ $labels.instance }}이(가) 1분 이상 응답하지 않습니다."
+
+    # --- Pod / Workload 알림 ---
+    - name: pod.rules
+      rules:
+        - alert: PodCrashLooping
+          expr: increase(kube_pod_container_status_restarts_total[15m]) > 3
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod CrashLoop 반복 ({{ $labels.namespace }}/{{ $labels.pod }})"
+            description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} 컨테이너 {{ $labels.container }}이(가) 15분 내 {{ $value }}회 재시작되었습니다."
+
+        - alert: PodNotReady
+          # Job owner 제외: 정상 종료된 Job pod는 Ready=False로 남지만 정상.
+          # for 5m → 10m: 롤아웃 중 일시적 0/1 Ready 상태는 알럿에서 제외.
+          expr: |
+            kube_pod_status_ready{condition="false"} == 1
+            unless on (namespace, pod)
+            kube_pod_owner{owner_kind="Job"}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod Ready 상태 아님 ({{ $labels.namespace }}/{{ $labels.pod }})"
+            description: "Pod {{ $labels.namespace }}/{{ $labels.pod }}이(가) 10분 이상 Not Ready 상태입니다."
+
+        - alert: DeploymentReplicasMismatch
+          expr: kube_deployment_spec_replicas != kube_deployment_status_available_replicas
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Deployment 레플리카 불일치 ({{ $labels.namespace }}/{{ $labels.deployment }})"
+            description: "{{ $labels.namespace }}/{{ $labels.deployment }} 목표 {{ $value }}와 실제 레플리카 수가 다릅니다."
+
+    # --- PVC / 스토리지 알림 ---
+    - name: storage.rules
+      rules:
+        - alert: PVCSpaceHigh
+          expr: (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) * 100 > 80
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVC 용량 부족 임박 ({{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }})"
+            description: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} 사용률: {{ $value | printf \"%.1f\" }}%"
+
+        - alert: PVCSpaceCritical
+          expr: (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) * 100 > 95
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PVC 용량 초과 위기 ({{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }})"
+            description: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} 사용률: {{ $value | printf \"%.1f\" }}% — 즉시 확장 필요"
+
+    # --- Longhorn 알림 ---
+    - name: longhorn.rules
+      rules:
+        - alert: LonghornVolumeDegraded
+          expr: longhorn_volume_robustness == 2
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn 볼륨 Degraded ({{ $labels.volume }})"
+            description: "Longhorn 볼륨 {{ $labels.volume }}이(가) Degraded 상태입니다. 레플리카 수를 확인하세요."
+
+        - alert: LonghornVolumeFaulted
+          expr: longhorn_volume_robustness == 3
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Longhorn 볼륨 Faulted ({{ $labels.volume }})"
+            description: "Longhorn 볼륨 {{ $labels.volume }}이(가) Faulted 상태입니다. 즉시 조치 필요!"
+
+        # 85% → 75% 로 임계값 낮춤 (조기 경보, eviction storm 사고 재발 방지)
+        - alert: LonghornNodeStorageFull
+          expr: (longhorn_node_storage_usage_bytes / longhorn_node_storage_capacity_bytes) * 100 > 75
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn 노드 스토리지 부족 ({{ $labels.node }})"
+            description: "Longhorn 노드 {{ $labels.node }} 스토리지 사용률: {{ $value | printf \"%.1f\" }}%"
+
+        - alert: LonghornNodeStorageCritical
+          expr: (longhorn_node_storage_usage_bytes / longhorn_node_storage_capacity_bytes) * 100 > 90
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Longhorn 노드 스토리지 위기 ({{ $labels.node }})"
+            description: "Longhorn 노드 {{ $labels.node }} {{ $value | printf \"%.1f\" }}% — kubelet eviction 임박. 즉시 replica 분산 필요."
+
+    # --- Prometheus 자체 알림 ---
+    - name: prometheus.rules
+      rules:
+        - alert: TargetDown
+          expr: up == 0
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Prometheus scrape 대상 응답 없음 ({{ $labels.job }}/{{ $labels.instance }})"
+            description: "Job {{ $labels.job }}, instance {{ $labels.instance }}이(가) 2분 이상 scrape 실패"
+
+    # --- Cilium BGP 알림 ---
+    # OPNSense와의 BGP 세션이 끊기면 LAN의 *.local.fresh96jwjw.org VIP 접근 불가.
+    # 메트릭 값: 1 = Established, 그 외 = 문제. label `node`로 어느 노드의 세션인지 식별.
+    - name: cilium-bgp.rules
+      rules:
+        - alert: CiliumBGPSessionDown
+          expr: cilium_bgp_control_plane_session_state != 1
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Cilium BGP 세션 끊김 ({{ $labels.node }} → {{ $labels.neighbor }})"
+            description: "Node {{ $labels.node }}의 BGP peer {{ $labels.neighbor }} 세션이 Established가 아닌 상태로 2분 초과. LAN 내부 도메인 접근 영향 가능."
+
+        - alert: CiliumBGPNoAdvertisedRoutes
+          expr: cilium_bgp_control_plane_advertised_routes < 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Cilium BGP 광고 경로 없음 ({{ $labels.node }})"
+            description: "Node {{ $labels.node }}가 BGP peer로 광고 중인 경로가 0개 (5분 이상). LoadBalancer VIP 광고 누락 상태."

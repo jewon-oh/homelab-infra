@@ -1,0 +1,198 @@
+# Gitea Helm chart values
+# Chart: gitea-charts/gitea 12.5.3 (appVersion 1.25.5)
+# 기존 hand-rolled 매니페스트(deployment.yaml/service.yaml)를 대체.
+# 기존 PVC `gitea-data` 및 SQLite DB·repos·LFS 데이터 보존.
+#
+# 보안 키 보존:
+#   chart의 configure_gitea.sh는 /data/gitea/conf/app.ini 가 존재하면
+#   SECRET_KEY / INTERNAL_TOKEN / OAUTH2_JWT_SECRET / LFS_JWT_SECRET 의
+#   env를 unset 처리하므로, 기존 4개 secret 이 자동 보존됨.
+
+replicaCount: 1
+
+strategy:
+  type: Recreate              # SQLite 단일 replica
+
+image:
+  registry: docker.io         # 기존 deployment 와 동일 (chart 기본은 docker.gitea.com)
+  repository: gitea/gitea
+  tag: "1.25.3"               # 현 live 와 동일. 향후 별도 PR 로 upgrade.
+  pullPolicy: IfNotPresent
+  rootless: false             # SSH port 22 직접 노출 위해 rootful 유지
+
+# 번들 서브차트 모두 비활성화 (단일 replica + SQLite)
+valkey-cluster:
+  enabled: false
+valkey:
+  enabled: false
+postgresql:
+  enabled: false
+postgresql-ha:
+  enabled: false
+
+# Ingress 비활성 (HTTPRoute 별도 — extras/httproute.yaml)
+ingress:
+  enabled: false
+route:
+  enabled: false
+
+# 기존 PVC 재사용
+persistence:
+  enabled: true
+  create: false
+  mount: true
+  claimName: gitea-data-v2
+
+# 스케줄링 — control-plane 노드(server-3) 고정.
+# 이유: SQLite 단일 replica라 IO 경합이 적고 여유 있는 노드에 두는 게 안정적이고,
+# data PVC가 Longhorn(네트워크 스토리지)이라 etcd와 디스크 경합도 없기 때문.
+nodeSelector: {}
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3s-server-3
+tolerations:
+  - key: amd.com/gpu
+    operator: Equal
+    value: "true"
+    effect: NoSchedule
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+service:
+  http:
+    type: ClusterIP
+    port: 3000
+    # 비워두면 chart 가 spec.clusterIP 필드 자체를 emit 하지 않음 →
+    # 기존 service 의 할당된 ClusterIP 보존 (immutable). chart 기본인
+    # "None"으로 두면 headless로 전환되어 기존 ClusterIP service 와 충돌.
+    clusterIP: ""
+  ssh:
+    type: NodePort
+    port: 22
+    nodePort: 30022           # 기존 NodePort 유지
+
+# 테스트 connection pod 비활성
+test:
+  enabled: false
+
+# Pod-level securityContext — fsGroup: 1000 (chart 기본) 유지하되, 첫 마이그 후
+# 매번 재시작 시 50Gi 데이터 chgrp 반복하지 않도록 OnRootMismatch 정책 적용.
+podSecurityContext:
+  fsGroup: 1000
+  fsGroupChangePolicy: OnRootMismatch
+
+# ServiceAccount 생성 비활성 (기존 default SA 사용)
+serviceAccount:
+  create: false
+
+gitea:
+  # admin 자동 생성/업데이트 비활성 — username/password/existingSecret 비워두면
+  # configure_admin_user() 블록이 템플릿 시점에 omit 됨.
+  admin:
+    username: ""
+    password: ""
+    email: ""
+    existingSecret: ""
+
+  # SeaweedFS S3 storage backend 정의 (PR-A 단계).
+  # [storage.gitea-packages] 섹션은 민감정보(MINIO_ACCESS_*)라
+  # 평문 values 대신 SealedSecret (extras/sealed-gitea-s3-packages.yaml) 로 주입.
+  # 이 PR 에서는 storage 정의만 추가 — packages.STORAGE_TYPE 은 아직 local 유지.
+  # 별도 PR-B 에서 packages.STORAGE_TYPE=gitea-packages 로 스위치 (migrate-storage 완료 후).
+  additionalConfigSources:
+    - secret:
+        secretName: gitea-s3-packages
+
+  metrics:
+    enabled: false
+
+  # liveness/readiness — 기존 deployment 와 동일하게 /api/healthz HTTP probe
+  livenessProbe:
+    enabled: true
+    httpGet:
+      path: /api/healthz
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    failureThreshold: 10
+    successThreshold: 1
+    timeoutSeconds: 1
+  readinessProbe:
+    enabled: true
+    httpGet:
+      path: /api/healthz
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    failureThreshold: 3
+    successThreshold: 1
+    timeoutSeconds: 1
+
+  # ⚠ chart 기본값이 기존 app.ini와 다른 경로/모드가 있어 명시적 override 필수:
+  #   - repository.ROOT: 차트 기본 /data/git/gitea-repositories → /data/gitea/gitea-repositories (기존 repo 경로)
+  #   - server.APP_DATA_PATH: 차트 기본 /data → /data/gitea
+  #   - session.PROVIDER: 차트 기본 memory → file (재시작 시 세션 유실 방지)
+  #   - indexer.ISSUE_INDEXER_TYPE: 차트 기본 db → bleve (기존 인덱스 보존)
+  config:
+    APP_NAME: "Gitea: Git with a cup of tea"
+    RUN_MODE: prod
+    repository:
+      ROOT: /data/gitea/gitea-repositories
+    server:
+      DOMAIN: gitea.local.fresh96jwjw.org
+      ROOT_URL: https://gitea.local.fresh96jwjw.org
+      HTTP_PORT: 3000
+      SSH_DOMAIN: gitea.local.fresh96jwjw.org
+      SSH_PORT: 22
+      SSH_LISTEN_PORT: 22     # rootful image
+      DISABLE_SSH: false
+      START_SSH_SERVER: false # rootful — openssh-server 가 처리
+      LFS_START_SERVER: true
+      OFFLINE_MODE: true
+      APP_DATA_PATH: /data/gitea
+    database:
+      DB_TYPE: sqlite3
+      PATH: /data/gitea/gitea.db
+    session:
+      PROVIDER: file
+      PROVIDER_CONFIG: /data/gitea/sessions
+    indexer:
+      ISSUE_INDEXER_TYPE: bleve
+      ISSUE_INDEXER_PATH: /data/gitea/indexers/issues.bleve
+    service:
+      REGISTER_EMAIL_CONFIRM: false
+      ENABLE_NOTIFY_MAIL: false
+    mailer:
+      ENABLED: false
+    security:
+      INSTALL_LOCK: true
+      REVERSE_PROXY_LIMIT: 1
+      REVERSE_PROXY_TRUSTED_PROXIES: "*"
+    lfs:
+      PATH: /data/gitea/lfs
+    attachment:
+      PATH: /data/gitea/attachments
+    # PR-B: packages STORAGE_TYPE 스위치 — gitea-packages 는 PR-A 에서 정의된
+    # [storage.gitea-packages] 섹션 (SealedSecret gitea-s3-packages 경유) 을 가리킴.
+    # migrate-storage 로 48.4 GiB 모두 SeaweedFS S3 에 복사 완료 후 진행.
+    packages:
+      STORAGE_TYPE: gitea-packages
+    picture:
+      AVATAR_UPLOAD_PATH: /data/gitea/avatars
+      REPOSITORY_AVATAR_UPLOAD_PATH: /data/gitea/repo-avatars
+    log:
+      MODE: console
+      LEVEL: info
+      ROOT_PATH: /data/gitea/log

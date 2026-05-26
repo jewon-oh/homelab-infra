@@ -1,0 +1,5 @@
+---
+- name: K3s 재시작
+  systemd:
+    name: k3s
+    state: restarted

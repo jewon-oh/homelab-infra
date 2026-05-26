@@ -1,0 +1,6 @@
+# K3s 공통 핸들러
+---
+- name: sshd 재시작
+  systemd:
+    name: sshd
+    state: restarted

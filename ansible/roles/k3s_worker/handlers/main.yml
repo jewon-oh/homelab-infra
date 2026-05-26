@@ -1,0 +1,6 @@
+# K3s Worker 핸들러
+---
+- name: K3s agent 재시작
+  systemd:
+    name: k3s-agent
+    state: restarted

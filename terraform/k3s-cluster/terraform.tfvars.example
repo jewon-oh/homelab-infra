@@ -1,0 +1,47 @@
+# ─── K3s 클러스터 환경 변수 ───
+# 이 파일을 복사하여 terraform.tfvars 로 이름 변경 후 값 수정
+
+# Proxmox 연결
+proxmox_api_url   = "https://<PROXMOX_IP>:8006"
+proxmox_api_token = "<USER>@pam!<TOKEN_NAME>=<TOKEN_VALUE>"
+proxmox_node      = "um880"
+
+# SSH 인증 (Bitwarden SSH Agent 사용 — 키 파일 지정 불필요)
+ssh_public_keys = ["ssh-ed25519 AAAA... your-key-comment"]
+
+# 공통
+bridge  = "vmbr0"
+storage = "app-1"
+
+# VM 사용자
+vm_user     = "jw"
+vm_password = "changeme"  # SSH 키가 메인 인증
+
+# Cloud Image (기본값 사용 시 생략 가능)
+# cloud_image_url      = "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.img"
+# cloud_image_filename = "debian-12-generic-amd64.img"
+
+# Worker 정의 (기본값: 2대)
+# workers = {
+#   "k3s-worker-1" = { vm_id = 201 }
+#   "k3s-worker-2" = { vm_id = 202 }
+# }
+
+# Worker 사양 (기본값 사용 시 생략 가능)
+# worker_cpu_cores = 2
+# worker_memory    = 4096
+# worker_disk_size = 32
+
+# ─── 추가 데이터 디스크 (Longhorn 등) ───
+# 각 server/worker 정의에 optional `extra_disks` 추가 (scsi1 부터 attach).
+# 예시: server-1 에 Longhorn 용 100G 추가
+#
+# servers = {
+#   "k3s-server-1" = {
+#     ...
+#     disk_size = 64
+#     extra_disks = [
+#       { storage = "app-1", size = 100 }
+#     ]
+#   }
+# }

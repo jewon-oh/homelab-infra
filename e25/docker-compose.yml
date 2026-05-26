@@ -1,0 +1,32 @@
+services:
+
+  # ─────────────────────────────────────────────
+  # AdGuard Home — DNS 광고 차단
+  # k3s 의존 없이 클러스터 외부에서 독립 운영
+  # ─────────────────────────────────────────────
+  adguard:
+    image: adguard/adguardhome:v0.107.73
+    container_name: adguard
+    restart: unless-stopped
+    network_mode: host          # DNS 53 포트 직접 바인딩 (NAT 우회)
+    volumes:
+      - ./data/adguard/work:/opt/adguardhome/work
+      - ./data/adguard/conf:/opt/adguardhome/conf
+    # 초기 설정: http://<E25-IP>:3000 → 완료 후 :80 으로 이동
+
+  # ─────────────────────────────────────────────
+  # Uptime Kuma — 서비스 가동 모니터링
+  # 클러스터 밖에 있어야 k3s 장애를 제대로 감지
+  # ─────────────────────────────────────────────
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: uptime-kuma
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./data/uptime-kuma:/app/data
+    environment:
+      - TZ=Asia/Seoul
+
+  # CrowdSec LAPI는 OPNsense(192.168.1.1:8080)에서 운영, bouncer는 k3s 내부에 잔존

@@ -1,0 +1,14 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: immich-postgres-secret
+  namespace: immich
+spec:
+  encryptedData:
+    POSTGRES_PASSWORD: AgAAVggd3Qsuf49k9lhn5e0v+lB08Ir2/xM6sZ8OYCiXNICpql/Jo+ay4j/BPKJL61XWYCrEeiEfUMPNJQXzZKx8YU1CPCPI8hLYDWWSRRhcATAsR5Z757ObcL2nKLGnxJ2SQj/29F0EhKDSBt+W8wNlktS5McUCV+oqP2+iWy4j6dSIOQZ9avHsncsn3fDUQKAejSkw3SWshZRZ4I6wJuXUJBRqCbGwR5X2tXQResZZpf/1GehA/NFwb0/tAWMbdA/iYZhFBmDFmTAj/lSodnDJ7Gz0JfFJx05y5X43Njpt4UYSwgPXloWGAMan3OCBnkJAAoC588lMcyWXXmRBwQAUIzoxtyd7lHOHOrXti51idbIlzKXIb+tszdrBkw+FOYI1U1lGcZLM5/CoRqY7iPqMRcmIB07V9ZiwuiYxo3JkF+6nN6XG39486KlMjfOUaJ/KRNo8omT+MIXoZFBBck0xPMDk/BAF5P8I5m/yIGozjBuEMsacdYeExvG4XltmVa9MY8VSsoQOqLfJsDLfVKr0qd65y97R6rV8/FZtOl1SOpe/n278U++6BizSPTReKgibEWDUZGb3CNCb5aRNvGTejlAjEPHUITaweWmOm7oOLO4AZ5lIuil+zJxWvA6BvRiXnbtAjJ7f4ePrEKYpcAmoLJu6DcmMcgLkIZYUDQYCP6wDPYgJEa2KoJuVYEE/7JgI+7abvVHvD/P7LBGggzZpeZR6MjZlxMuTP+JBoW34LQ==
+  template:
+    metadata:
+      name: immich-postgres-secret
+      namespace: immich
+    type: Opaque

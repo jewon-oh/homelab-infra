@@ -1,0 +1,27 @@
+# Terraform
+*.tfstate
+*.tfstate.backup
+*.tfstate.*.backup
+*.tfvars
+!*.tfvars.example
+.terraform/
+.terraform.lock.hcl
+
+# Ansible
+*.retry
+vault-password.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets — 평문 시크릿 파일 제외
+.env
+.env.*
+!.env.*.example
+*-secret.yaml
+secret.yaml
+immich-values.yaml
+
+# SealedSecret(암호화됨)은 반드시 커밋 — 위 규칙에서 예외 처리
+!sealed-*.yaml

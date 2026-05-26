@@ -1,0 +1,19 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: custom-proxy-config
+  namespace: default
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: LoadBalancer
+        externalTrafficPolicy: Cluster
+      envoyDeployment:
+        pod:
+          tolerations:
+            - key: "amd.com/gpu"
+              operator: "Equal"
+              value: "true"
+              effect: "NoSchedule"

@@ -1,0 +1,48 @@
+# Multi-replica Deployment 의 PDB 부재 감지 (#52)
+#
+# 실제 생성 차단은 어려움 — Deployment 와 PDB 는 별 리소스. 본 정책은 audit 만
+# (background validation 으로 매니페스트 검사).
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-pdb-for-multi-replica
+  annotations:
+    policies.kyverno.io/title: Require PDB for multi-replica
+    policies.kyverno.io/category: Availability
+    policies.kyverno.io/severity: low
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: check-pdb-exists
+      match:
+        any:
+          - resources:
+              kinds:
+                - Deployment
+              operations: [CREATE, UPDATE]
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+      preconditions:
+        all:
+          - key: "{{ request.object.spec.replicas || `0` }}"
+            operator: GreaterThan
+            value: 1
+      context:
+        - name: pdbs
+          apiCall:
+            urlPath: "/apis/policy/v1/namespaces/{{ request.namespace }}/poddisruptionbudgets"
+            jmesPath: "items[?spec.selector.matchLabels.app == '{{ request.object.spec.selector.matchLabels.app || '' }}'] | length(@)"
+      validate:
+        message: "multi-replica Deployment ({{ request.object.spec.replicas }}) 에 대응 PDB 미발견"
+        deny:
+          conditions:
+            all:
+              - key: "{{ pdbs }}"
+                operator: Equals
+                value: 0

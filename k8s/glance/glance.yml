@@ -1,0 +1,472 @@
+server:
+
+theme:
+  background-color: 240 21 15
+  contrast-multiplier: 1.2
+  primary-color: 217 92 83
+  positive-color: 115 54 76
+  negative-color: 347 70 65
+
+pages:
+  - name: Home
+    head-widgets:
+      - type: bookmarks
+        groups:
+          - title: General
+            links:
+              - title: Naver
+                url: https://www.naver.com/
+                icon: https://www.naver.com/favicon.ico
+              - title: YouTube
+                url: https://www.youtube.com/
+                icon: di:youtube
+              - title: Chzzk
+                url: https://chzzk.naver.com/
+                icon: https://chzzk.naver.com/favicon.ico
+          - title: Dev
+            links:
+              - title: GitHub
+                url: https://github.com/
+                icon: https://github.com/favicon.ico
+              - title: DevDocs
+                url: https://devdocs.io/
+                icon: https://devdocs.io/favicon.ico
+          - title: Self-Hosted
+            links:
+              - title: Helper Scripts
+                url: https://community-scripts.github.io/ProxmoxVE/
+                icon: di:proxmox
+              - title: Awesome Self-Hosted
+                url: https://github.com/awesome-selfhosted/awesome-selfhosted
+                icon: https://github.com/favicon.ico
+          - title: AI / Tools
+            links:
+              - title: Gemini
+                url: https://gemini.google.com
+                icon: https://www.gstatic.com/lamda/images/gemini_sparkle_aurora_33f86dc0c0257da337c63.svg
+              - title: Claude
+                url: https://claude.ai/
+                icon: https://claude.ai/favicon.ico
+              - title: Notion
+                url: https://www.notion.so/
+                icon: https://www.notion.so/images/favicon.ico
+
+    columns:
+      - size: small
+        widgets:
+          - type: weather
+            location: Seoul, South Korea
+            units: metric
+            hour-format: 24h
+            cache: 30m
+
+          - type: markets
+            cache: 10m
+            markets:
+              - symbol: SPY
+                name: S&P 500
+              - symbol: NVDA
+                name: NVIDIA
+              - symbol: AAPL
+                name: Apple
+              - symbol: 005930.KS
+                name: 삼성전자
+
+      - size: full
+        widgets:
+          - type: search
+            autofocus: true
+            search-engine: google
+
+          - type: group
+            widgets:
+              - type: rss
+                title: GeekNews
+                cache: 1h
+                feeds:
+                  - url: https://feeds.feedburner.com/geeknews-feed
+              - type: rss
+                title: 서버포럼
+                cache: 1h
+                feeds:
+                  - url: https://svrforum.com/rss
+              - type: rss
+                title: Eric-Na
+                cache: 24h
+                feeds:
+                  - url: https://ericna.pages.dev/index.xml
+
+          - type: videos
+            cache: 1h
+            channels:
+              - UCR-DXc1voovS8nhAvccRZhg # Jeff Geerling
+              - UCHnyfMqiRRG1u-2MsSQLbXA # Veritasium
+              - UCdUcjkyZtf-1WJyPPiETF1g # 잇섭
+              - UCdpbqw5DPdBfaeByMF2Re0g # 없섭
+  - name: Services
+    columns:
+      - size: small
+        widgets:
+          - type: custom-api
+            title: Proxmox 호스트 현황
+            cache: 30s
+            url: ${PROXMOXVE_URL}/api2/json/nodes
+            headers:
+              Authorization: "PVEAPIToken=${PROXMOXVE_KEY}"
+            template: |
+              <div style="display:flex;flex-wrap:wrap;gap:8px">
+              {{- range .JSON.Array "data" }}
+              {{- if eq (.String "status") "online" }}
+                {{- $cpu_pct := mul (.Float "cpu") 100.0 }}
+                {{- $mem_pct := mul (div (.Float "mem") (.Float "maxmem")) 100.0 }}
+                {{- $mem_gb := div (.Float "mem") 1073741824.0 }}
+                {{- $maxmem_gb := div (.Float "maxmem") 1073741824.0 }}
+                {{- $cpu_color := "#55aa88" }}{{ if ge $cpu_pct 85.0 }}{{ $cpu_color = "#e05555" }}{{ else if ge $cpu_pct 60.0 }}{{ $cpu_color = "#d4a843" }}{{ end }}
+                {{- $mem_color := "#55aa88" }}{{ if ge $mem_pct 85.0 }}{{ $mem_color = "#e05555" }}{{ else if ge $mem_pct 60.0 }}{{ $mem_color = "#d4a843" }}{{ end }}
+                {{- $disk_pct := mul (div (.Float "disk") (.Float "maxdisk")) 100.0 }}
+                {{- $disk_gb := div (.Float "disk") 1073741824.0 }}
+                {{- $maxdisk_gb := div (.Float "maxdisk") 1073741824.0 }}
+                {{- $disk_color := "#55aa88" }}{{ if ge $disk_pct 85.0 }}{{ $disk_color = "#e05555" }}{{ else if ge $disk_pct 60.0 }}{{ $disk_color = "#d4a843" }}{{ end }}
+                <div style="flex:1;min-width:140px;background:#ffffff08;border-radius:8px;padding:10px 12px">
+                  <div style="font-weight:600;color:#aaa;margin-bottom:6px;font-size:0.8em;text-transform:uppercase;letter-spacing:.05em">{{ .String "node" }}</div>
+                  <div style="display:flex;justify-content:space-between;font-size:0.82em;margin-bottom:1px">
+                    <span style="color:#888">CPU</span><span style="color:{{ $cpu_color }};font-weight:600">{{ printf "%.1f" $cpu_pct }}%</span>
+                  </div>
+                  <div style="background:#ffffff18;border-radius:3px;height:5px;margin:2px 0 8px">
+                    <div style="background:{{ $cpu_color }};width:{{ if gt $cpu_pct 100.0 }}100{{ else }}{{ printf "%.1f" $cpu_pct }}{{ end }}%;height:5px;border-radius:3px"></div>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;font-size:0.82em;margin-bottom:1px">
+                    <span style="color:#888">RAM</span><span style="color:{{ $mem_color }};font-weight:600">{{ printf "%.1f" $mem_gb }} / {{ printf "%.1f" $maxmem_gb }} GB</span>
+                  </div>
+                  <div style="background:#ffffff18;border-radius:3px;height:5px;margin:2px 0 8px">
+                    <div style="background:{{ $mem_color }};width:{{ if gt $mem_pct 100.0 }}100{{ else }}{{ printf "%.1f" $mem_pct }}{{ end }}%;height:5px;border-radius:3px"></div>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;font-size:0.82em;margin-bottom:1px">
+                    <span style="color:#888">Disk</span><span style="color:{{ $disk_color }};font-weight:600">{{ printf "%.1f" $disk_gb }} / {{ printf "%.1f" $maxdisk_gb }} GB</span>
+                  </div>
+                  <div style="background:#ffffff18;border-radius:3px;height:5px;margin:2px 0 8px">
+                    <div style="background:{{ $disk_color }};width:{{ if gt $disk_pct 100.0 }}100{{ else }}{{ printf "%.1f" $disk_pct }}{{ end }}%;height:5px;border-radius:3px"></div>
+                  </div>
+                </div>
+              {{- end }}
+              {{- end }}
+              </div>
+
+          - type: custom-api
+            title: k3s 노드 상태
+            cache: 30s
+            url: ${K8S_API_URL}/api/v1/nodes
+            headers:
+              Authorization: "Bearer ${K8S_TOKEN}"
+            allow-insecure: true
+            template: |
+              <div style="display:flex;flex-wrap:wrap;gap:8px">
+              {{- range .JSON.Array "items" }}
+                {{- $name := .String "metadata.name" }}
+                {{- $ready := false }}
+                {{- range .Array "status.conditions" }}
+                  {{- if eq (.String "type") "Ready" }}
+                    {{- if eq (.String "status") "True" }}{{ $ready = true }}{{ end }}
+                  {{- end }}
+                {{- end }}
+                {{- $roles := "worker" }}
+                {{- if .Exists "metadata.labels.node-role.kubernetes.io/master" }}{{ $roles = "server" }}{{ end }}
+                {{- if .Exists "metadata.labels.node-role.kubernetes.io/control-plane" }}{{ $roles = "server" }}{{ end }}
+                <div style="flex:1;min-width:120px;background:#ffffff08;border-radius:8px;padding:8px 12px">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                    <span style="font-weight:600;color:#ccc;font-size:0.85em">{{ $name }}</span>
+                    {{ if $ready }}
+                      <span style="background:#55aa88;color:#000;font-size:0.65em;padding:2px 6px;border-radius:3px;font-weight:bold">Ready</span>
+                    {{ else }}
+                      <span style="background:#e05555;color:#fff;font-size:0.65em;padding:2px 6px;border-radius:3px;font-weight:bold">NotReady</span>
+                    {{ end }}
+                  </div>
+                  <div style="font-size:0.7em;color:#888">{{ $roles }}</div>
+                </div>
+              {{- end }}
+              </div>
+
+          - type: custom-api
+            title: TrueNAS 데이터셋
+            cache: 1m
+            template: |
+              {{ $dataset := newRequest "${TRUENAS_HOST}/api/v2.0/pool/dataset" | withHeader "Authorization" "Bearer ${TRUENAS_API_KEY}" | getResponse }}
+              {{ $pool := newRequest "${TRUENAS_HOST}/api/v2.0/pool" | withHeader "Authorization" "Bearer ${TRUENAS_API_KEY}" | getResponse }}
+              {{ range $dataset.JSON.Array "" }}
+                {{ if not (findMatch "/" (.String "name")) }}
+                  {{ $used := .Float "used.parsed" }}
+                  {{ $available := .Float "available.parsed" }}
+                  {{ $total := add $used $available }}
+                  {{ $percent := 0.0 }}{{ if gt $total 0.0 }}{{ $percent = mul (div $used $total) 100.0 }}{{ end }}
+                  {{ $totalTb := div (div (div (div $total 1024.0) 1024.0) 1024.0) 1024.0 | printf "%.1f" }}
+                  {{ $searchString := printf "..#.#(name==\"%s\").healthy|0" (.String "name") }}
+                  {{ $healthy := $pool.JSON.Bool $searchString }}
+                  {{ $bar_color := "#55aa88" }}{{ if ge $percent 85.0 }}{{ $bar_color = "#e05555" }}{{ else if ge $percent 60.0 }}{{ $bar_color = "#d4a843" }}{{ end }}
+                  <div style="margin-bottom: 12px;">
+                    <div style="font-weight:600;font-size:0.9em;margin-bottom:4px;color:#ccc">
+                      {{ if $healthy }}
+                        <span style="display:inline-block;background-color:#55aa88;width:10px;height:10px;border-radius:50%;margin-right:6px"></span>
+                      {{ else }}
+                        <span style="display:inline-block;background-color:#e05555;width:10px;height:10px;border-radius:50%;margin-right:6px"></span>
+                      {{ end }}
+                      <span>{{ .String "name" }}</span>
+                    </div>
+                    <div style="background:#ffffff18;border-radius:3px;height:14px;position:relative;overflow:hidden">
+                      <div style="background:{{ $bar_color }};width:{{ printf "%.1f" $percent }}%;height:100%"></div>
+                      <div style="position:absolute;inset:0;display:flex;justify-content:center;align-items:center;font-size:0.7em;font-weight:bold;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.8)">
+                        {{ .String "used.value" }} / {{ $totalTb }}T ({{ printf "%.1f" $percent }}%)
+                      </div>
+                    </div>
+                  </div>
+                {{ end }}
+              {{ end }}
+
+          - type: custom-api
+            title: Uptime Kuma
+            title-url: ${UPTIME_KUMA_URL}
+            url: ${UPTIME_KUMA_URL}/api/status-page/${UPTIME_KUMA_STATUS_SLUG}
+            subrequests:
+              heartbeats:
+                url: ${UPTIME_KUMA_URL}/api/status-page/heartbeat/${UPTIME_KUMA_STATUS_SLUG}
+            cache: 10m
+            template: |
+              {{ $hb := .Subrequest "heartbeats" }}
+              {{ if not (.JSON.Exists "publicGroupList") }}
+                <p class="color-negative">Error reading response</p>
+              {{ else if eq (len (.JSON.Array "publicGroupList")) 0 }}
+                <p>No monitors found</p>
+              {{ else }}
+                <ul class="dynamic-columns list-gap-8">
+                {{ range .JSON.Array "publicGroupList" }}
+                  {{ range .Array "monitorList" }}
+                    {{ $id := .String "id" }}
+                    {{ $hbArray := $hb.JSON.Array (print "heartbeatList." $id) }}
+                    <div class="flex items-center gap-12">
+                      <a class="size-title-dynamic color-highlight text-truncate block grow" href="${UPTIME_KUMA_URL}/dashboard/{{ $id }}" target="_blank" rel="noreferrer">
+                        {{ .String "name" }}
+                      </a>
+                      {{ if gt (len $hbArray) 0 }}
+                        {{ $latest := index $hbArray (sub (len $hbArray) 1) }}
+                        {{ if eq ($latest.Int "status") 1 }}
+                          <div>{{ $latest.Int "ping" }}ms</div>
+                          <div class="monitor-site-status-icon-compact" title="OK">
+                            <svg fill="var(--color-positive)" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                              <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd"></path>
+                            </svg>
+                          </div>
+                        {{ else }}
+                          <div><span class="color-negative">DOWN</span></div>
+                          <div class="monitor-site-status-icon-compact" title="Error">
+                            <svg fill="var(--color-negative)" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                              <path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-8-5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5A.75.75 0 0 1 10 5Zm0 10a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd"></path>
+                            </svg>
+                          </div>
+                        {{ end }}
+                      {{ else }}
+                        <div><span style="color:#888">N/A</span></div>
+                      {{ end }}
+                    </div>
+                  {{ end }}
+                {{ end }}
+                </ul>
+              {{ end }}
+
+          - type: dns-stats
+            title: AdGuard Home 통계
+            service: adguard
+            url: https://adguard.local.fresh96jwjw.org
+            username: ${ADGUARD_USERNAME}
+            password: ${ADGUARD_PASSWORD}
+
+          - type: custom-api
+            title: Immich 저장소
+            url: ${IMMICH_URL}/api/server/statistics
+            headers:
+              x-api-key: ${IMMICH_API_KEY}
+            method: GET
+            template: |
+              <div style="display:flex;justify-content:space-around;text-align:center;padding:4px 0">
+                <div>
+                  <div style="font-size:1.4em;font-weight:bold;color:var(--primary-color)">{{ .JSON.Float "photos" | printf "%.0f" }}</div>
+                  <div style="font-size:0.7em;color:#888;text-transform:uppercase;margin-top:2px">Photos</div>
+                </div>
+                <div>
+                  <div style="font-size:1.4em;font-weight:bold;color:var(--primary-color)">{{ .JSON.Float "videos" | printf "%.0f" }}</div>
+                  <div style="font-size:0.7em;color:#888;text-transform:uppercase;margin-top:2px">Videos</div>
+                </div>
+                <div>
+                  <div style="font-size:1.4em;font-weight:bold;color:var(--primary-color)">{{ div (div (div (.JSON.Float "usage") 1024.0) 1024.0) 1024.0 | printf "%.1f" }}<span style="font-size:0.6em;margin-left:2px">GB</span></div>
+                  <div style="font-size:0.7em;color:#888;text-transform:uppercase;margin-top:2px">Usage</div>
+                </div>
+              </div>
+
+          - type: custom-api
+            title: PeaNUT UPS 상태
+            title-url: https://peanut.local.fresh96jwjw.org
+            cache: 1m
+            url: ${PEANUT_URL}/api/v1/devices/${PEANUT_DEVICE}
+            method: GET
+            template: |
+              {{- $charge := .JSON.Int "battery\\.charge" }}
+              {{- $runtime := .JSON.Int "battery\\.runtime" }}
+              {{- $voltage := .JSON.Float "battery\\.voltage" }}
+              {{- $load := .JSON.Int "ups\\.load" }}
+              {{- $nominal := .JSON.Int "ups\\.realpower\\.nominal" }}
+              {{- $current := div (mul $load $nominal) 100 }}
+              {{- $charge_color := "#55aa88" }}{{ if le $charge 20 }}{{ $charge_color = "#e05555" }}{{ else if le $charge 50 }}{{ $charge_color = "#d4a843" }}{{ end }}
+              {{- $load_color := "#55aa88" }}{{ if ge $load 85 }}{{ $load_color = "#e05555" }}{{ else if ge $load 60 }}{{ $load_color = "#d4a843" }}{{ end }}
+              <div style="background:#ffffff08;border-radius:8px;padding:10px 12px">
+                <div style="display:flex;justify-content:space-between;font-size:0.82em;margin-bottom:1px">
+                  <span style="color:#888">Battery</span><span style="color:{{ $charge_color }};font-weight:600">{{ $charge }}%</span>
+                </div>
+                <div style="background:#ffffff18;border-radius:3px;height:5px;margin:2px 0 8px">
+                  <div style="background:{{ $charge_color }};width:{{ $charge }}%;height:5px;border-radius:3px"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:0.82em;margin-bottom:1px">
+                  <span style="color:#888">Load</span><span style="color:{{ $load_color }};font-weight:600">{{ $load }}%  ({{ $current }}W / {{ $nominal }}W)</span>
+                </div>
+                <div style="background:#ffffff18;border-radius:3px;height:5px;margin:2px 0 8px">
+                  <div style="background:{{ $load_color }};width:{{ $load }}%;height:5px;border-radius:3px"></div>
+                </div>
+                <div style="display:flex;justify-content:space-around;text-align:center;margin-top:8px;padding-top:8px;border-top:1px solid #ffffff10">
+                  <div>
+                    <div style="font-size:1.1em;font-weight:bold;color:#ccc">{{ div $runtime 60 }}<span style="font-size:0.6em;margin-left:2px">min</span></div>
+                    <div style="font-size:0.65em;color:#888;text-transform:uppercase;margin-top:2px">Runtime</div>
+                  </div>
+                  <div>
+                    <div style="font-size:1.1em;font-weight:bold;color:#ccc">{{ printf "%.1f" $voltage }}<span style="font-size:0.6em;margin-left:2px">V</span></div>
+                    <div style="font-size:0.65em;color:#888;text-transform:uppercase;margin-top:2px">Voltage</div>
+                  </div>
+                </div>
+              </div>
+
+          - type: custom-api
+            title: Jellyfin 재생 상태
+            url: ${JELLYFIN_URL}/Sessions?api_key=${JELLYFIN_API_KEY}
+            method: GET
+            template: |
+              {{- $playing := false }}
+              {{- range .JSON.Array "" }}
+                {{- if .Exists "NowPlayingItem" }}
+                  {{- $playing = true }}
+                  <div style="background:#ffffff08;padding:8px 12px;border-radius:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">
+                    <div>
+                      <div style="color:var(--primary-color);font-weight:bold;font-size:0.9em">{{ .String "NowPlayingItem.Name" }}</div>
+                      <div style="color:#aaa;font-size:0.8em;opacity:0.8;margin-top:2px">{{ .String "Client" }} ({{ .String "DeviceName" }})</div>
+                    </div>
+                    <div style="font-size:0.7em;padding:4px 8px;background:var(--primary-color);color:#000;border-radius:4px;font-weight:bold;letter-spacing:0.05em">PLAYING</div>
+                  </div>
+                {{- end }}
+              {{- end }}
+              {{- if not $playing }}
+                <div style="color:#888;font-size:0.85em;text-align:center;padding:12px;background:#ffffff04;border-radius:8px">재생 중인 미디어가 없습니다.</div>
+              {{- end }}
+
+      - size: full
+        widgets:
+          - type: monitor
+            title: Network
+            sites:
+              - title: AdGuard Home
+                url: https://adguard.local.fresh96jwjw.org
+                icon: di:adguard-home
+              - title: OPNsense
+                url: https://opnsense.local.fresh96jwjw.org
+                icon: di:opnsense
+              - title: Vaultwarden
+                url: https://vaultwarden.fresh96jwjw.org
+                icon: di:vaultwarden
+
+          - type: monitor
+            title: Proxmox
+            sites:
+              - title: Proxmox
+                url: https://proxmox-wtr-pro.local.fresh96jwjw.org
+                icon: di:proxmox
+              - title: Proxmox Backup
+                url: https://proxmox-backup.local.fresh96jwjw.org
+                icon: di:proxmox
+
+          - type: monitor
+            title: IoT
+            sites:
+              - title: Home Assistant
+                url: https://hass.local.fresh96jwjw.org
+                icon: di:home-assistant
+              - title: Frigate
+                url: http://192.168.1.198:5000
+                icon: di:frigate
+              # - title: Zigbee2MQTT
+              #   url: https://z2m.local.fresh96jwjw.org
+              #   icon: di:zigbee2mqtt
+              - title: Peanut (UPS)
+                url: https://peanut.local.fresh96jwjw.org
+                icon: di:peanut
+
+          - type: monitor
+            title: Storage
+            sites:
+              - title: TrueNAS
+                url: https://truenas.local.fresh96jwjw.org
+                icon: di:truenas
+              - title: SeaweedFS
+                url: http://192.168.1.11:30300
+                icon: https://raw.githubusercontent.com/seaweedfs/seaweedfs/master/note/_images/seaweedfs.png
+              - title: Jellyfin
+                url: https://jellyfin.local.fresh96jwjw.org
+                icon: di:jellyfin
+              - title: Immich
+                url: https://immich.local.fresh96jwjw.org
+                icon: di:immich
+              - title: Longhorn
+                url: https://longhorn.local.fresh96jwjw.org
+                icon: di:longhorn
+
+          - type: monitor
+            title: Docs
+            sites:
+              - title: Syncthing
+                url: https://syncthing.local.fresh96jwjw.org
+                icon: di:syncthing
+              - title: Blog
+                url: https://blog.fresh96jwjw.org
+
+          - type: monitor
+            title: Dev
+            sites:
+              - title: Hubble
+                url: https://hubble.local.fresh96jwjw.org
+                icon: di:cilium
+              - title: Grafana
+                url: https://grafana.local.fresh96jwjw.org
+                icon: di:grafana
+              - title: Prometheus
+                url: https://prometheus.local.fresh96jwjw.org
+                icon: di:prometheus
+              - title: ByteStash
+                url: https://bytestash.local.fresh96jwjw.org
+                icon: di:bytestash
+              - title: Qdrant
+                url: https://qdrant.local.fresh96jwjw.org
+                icon: di:qdrant
+              - title: Gitea
+                url: https://gitea.local.fresh96jwjw.org
+                icon: di:gitea
+              - title: ArgoCD
+                url: https://argocd.local.fresh96jwjw.org
+                icon: di:argo-cd
+              - title: Headlamp
+                url: https://headlamp.local.fresh96jwjw.org
+                icon: di:headlamp
+
+
+          - type: monitor
+            title: AI / Automation
+            sites:
+              - title: N8N
+                url: https://n8n.local.fresh96jwjw.org
+                icon: di:n8n
+              - title: OpenBB
+                url: https://openbb-api.local.fresh96jwjw.org
+                icon: https://openbb.co/favicon.ico
+

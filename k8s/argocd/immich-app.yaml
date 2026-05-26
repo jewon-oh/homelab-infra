@@ -1,0 +1,66 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: immich
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: 'https://immich-app.github.io/immich-charts'
+      chart: immich
+      targetRevision: '*'
+      helm:
+        values: |
+          image:
+            tag: "v2.5.6"
+            
+          immich:
+            persistence:
+              library:
+                existingClaim: immich-nfs-pvc
+          
+          controllers:
+            main:
+              containers:
+                main:
+                  envFrom:
+                    - secretRef:
+                        name: immich-db-secret
+                  env:
+                    REDIS_HOSTNAME: "immich-redis"
+
+          machine-learning:
+            controllers:
+              main:
+                pod:
+                  nodeSelector:
+                    amd.com/gpu: "true"
+                  tolerations:
+                    - key: "amd.com/gpu"
+                      operator: "Equal"
+                      value: "true"
+                      effect: "NoSchedule"
+          
+          ingress:
+            main:
+              enabled: false
+          
+          # Server is now ready to start as the DB has been restored
+          server:
+            replicaCount: 1
+            
+    - repoURL: 'https://gitea.local.fresh96jwjw.org/jw/homelab-infra.git'
+      path: k8s/immich
+      targetRevision: main
+      
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: immich
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

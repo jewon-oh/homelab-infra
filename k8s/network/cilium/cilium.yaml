@@ -1,0 +1,68 @@
+# Cilium CNI + Hubble + BGP Control Plane
+# K3s 내장 Helm Controller를 통해 클러스터 부팅 시 자동 배포
+# /var/lib/rancher/k3s/server/manifests/ 에 배치하면 K3s가 자동 적용
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: cilium
+  namespace: kube-system
+spec:
+  repo: https://helm.cilium.io/
+  chart: cilium
+  version: "1.17.1"
+  targetNamespace: kube-system
+  # bootstrap: true 제거 — 이 플래그는 k3s 최초 부팅 시에만 평가되고
+  # 이후 spec 변경 시 helm-controller가 upgrade job을 재실행하지 않음.
+  # 과거 1.15.3 → 1.17.1 업그레이드 후 helm CLI로만 동기화되고 HelmChart CR은
+  # 원복되어 Addon 재적용 시 1.15.3으로 돌아가는 문제의 근본 원인이었음.
+  valuesContent: |-
+    operator:
+      replicas: 1
+      # cilium-operator 메트릭 + ServiceMonitor (kube-prometheus-stack 자동 스크레이프)
+      prometheus:
+        enabled: true
+        serviceMonitor:
+          enabled: true
+          labels:
+            release: observability
+
+    # cilium-agent 메트릭 + ServiceMonitor — BGP/네트워크 관측용
+    prometheus:
+      enabled: true
+      serviceMonitor:
+        enabled: true
+        labels:
+          release: observability
+
+    # BGP Control Plane (L2 Announcement 대체)
+    bgpControlPlane:
+      enabled: true
+    l2announcements:
+      enabled: false
+
+    kubeProxyReplacement: true
+    enableHealthCheckNodePort: false
+
+    # Pod → LoadBalancer VIP 크로스 노드 접근 시 SNAT 적용
+    bpf:
+      lbExternalClusterIP: true
+
+    k8sClientRateLimit:
+      qps: 15
+      burst: 30
+
+    ipam:
+      operator:
+        clusterPoolIPv4PodCIDRList:
+          - "10.42.0.0/16"
+
+    k8sServiceHost: "192.168.4.10"
+    k8sServicePort: 6443
+
+    hubble:
+      enabled: true
+      relay:
+        enabled: true
+      ui:
+        enabled: true

@@ -1,0 +1,25 @@
+# Gitea PVC — Longhorn 분산 스토리지
+# 데이터 저장 (SQLite DB + repos + LFS + sessions/avatars/attachments).
+# packages 는 SeaweedFS S3 로 분리됨 (storage.gitea-packages).
+#
+# 사이즈 산정 (2026-05-14):
+#   - 실사용 약 980 MB (packages 빠진 후)
+#   - 향후 repo / LFS 증가 여유 + 인덱스
+#   - 20 GiB 면 충분 (예전 100 GiB 는 packages 때문에 필요했음)
+#
+# 마이그레이션 이력:
+#   - 50 GiB → 100 GiB (인시던트 복구)
+#   - 100 GiB (PVC: gitea-data) → 20 GiB (PVC: gitea-data-v2) [현재]
+#     Longhorn shrink 미지원이라 새 PVC 생성 + rsync swap 으로 처리.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitea-data-v2
+  namespace: gitea
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 20Gi

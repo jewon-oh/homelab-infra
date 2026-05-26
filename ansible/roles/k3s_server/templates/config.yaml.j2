@@ -1,0 +1,34 @@
+# K3s Server 설정 — HA embedded etcd
+# Techno Tim 스타일: config.yaml로 옵션 관리
+---
+write-kubeconfig-mode: "0644"
+disable:
+  - traefik
+  - servicelb
+tls-san:
+  - "{{ k3s_vip }}"
+  - "{{ ansible_host }}"
+  - "{{ inventory_hostname }}"
+cluster-cidr: "{{ k3s_cluster_cidr }}"
+service-cidr: "{{ k3s_service_cidr }}"
+node-ip: "{{ ansible_host }}"
+
+# Cilium CNI 사용 — 기본 Flannel, NetworkPolicy 및 Kube-Proxy 비활성화
+flannel-backend: none
+disable-network-policy: true
+disable-kube-proxy: true
+
+# API Server 성능 최적화 (etcd I/O 부하 감소를 위해 Event 보존 시간 단축)
+kube-apiserver-arg:
+  - "event-ttl=15m"
+
+# etcd S3 Backup (SeaweedFS) — 자격증명은 변수로 주입 (inventory/vault 또는 -e)
+etcd-s3: true
+etcd-s3-endpoint: "{{ etcd_s3_endpoint }}"
+etcd-s3-bucket: "{{ etcd_s3_bucket }}"
+etcd-s3-folder: "{{ etcd_s3_folder }}"
+etcd-s3-access-key: "{{ etcd_s3_access_key }}"
+etcd-s3-secret-key: "{{ etcd_s3_secret_key }}"
+etcd-s3-insecure: true
+etcd-snapshot-schedule-cron: "0 0 * * *"
+etcd-snapshot-retention: 14

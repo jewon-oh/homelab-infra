@@ -1,0 +1,23 @@
+# ArgoCD Application — database (PostgreSQL + Redis)
+# homelab-infra 레포의 k8s/database/ 디렉토리를 감시하여 자동 배포
+# 주의: secret.yaml은 k8s/secrets/로 분리됨, 수동 apply 필요
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: database
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://gitea.local.fresh96jwjw.org/jw/homelab-infra.git
+    targetRevision: main
+    path: k8s/database
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: database
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

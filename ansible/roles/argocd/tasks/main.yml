@@ -1,0 +1,172 @@
+# ArgoCD 설치 역할
+---
+- name: argocd 네임스페이스 생성
+  command: kubectl create namespace argocd
+  register: ns_result
+  changed_when: "'created' in ns_result.stdout"
+  failed_when: ns_result.rc != 0 and 'AlreadyExists' not in ns_result.stderr
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: ArgoCD 매니페스트 적용 (server-side apply)
+  command: >
+    kubectl apply -n argocd --server-side --force-conflicts
+    -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: ArgoCD Pod 시작 대기
+  command: >
+    kubectl wait --for=condition=available
+    --timeout=300s deployment/argocd-server -n argocd
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  retries: 3
+  delay: 10
+  register: argocd_wait
+  until: argocd_wait.rc == 0
+
+- name: ArgoCD insecure 모드 활성화 (TLS를 Envoy Gateway에서 처리)
+  command: >
+    kubectl patch configmap argocd-cmd-params-cm -n argocd
+    --type merge
+    -p '{"data": {"server.insecure": "true"}}'
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: ArgoCD 서버 재시작 (insecure 모드 적용)
+  command: kubectl rollout restart deployment/argocd-server -n argocd
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: ArgoCD 재시작 완료 대기
+  command: >
+    kubectl rollout status deployment/argocd-server -n argocd
+    --timeout=120s
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: ArgoCD HTTPRoute 적용 (Envoy Gateway를 통해 외부 노출)
+  copy:
+    dest: /tmp/argocd-httproute.yaml
+    content: |
+      apiVersion: gateway.networking.k8s.io/v1
+      kind: HTTPRoute
+      metadata:
+        name: argocd
+        namespace: argocd
+      spec:
+        parentRefs:
+          - name: internal-gateway
+            namespace: default
+        hostnames:
+          - "argocd.local.fresh96jwjw.org"
+        rules:
+          - backendRefs:
+              - name: argocd-server
+                port: 80
+    mode: "0644"
+
+- name: ArgoCD HTTPRoute 적용
+  command: kubectl apply -f /tmp/argocd-httproute.yaml
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: 임시 파일 정리
+  file:
+    path: /tmp/argocd-httproute.yaml
+    state: absent
+
+- name: ArgoCD Gitea repo 인증 시크릿 매니페스트 생성
+  copy:
+    dest: /tmp/argocd-repo-secret.yaml
+    content: |
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: argocd-repo-homelab
+        namespace: argocd
+        labels:
+          argocd.argoproj.io/secret-type: repository
+      type: Opaque
+      stringData:
+        type: git
+        url: https://gitea.local.fresh96jwjw.org/jw/homelab-infra.git
+        username: jw
+        password: "{{ registry_token }}"
+    mode: "0600"
+  when: registry_token is defined
+
+- name: ArgoCD Gitea repo 인증 시크릿 적용
+  command: kubectl apply -f /tmp/argocd-repo-secret.yaml
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  when: registry_token is defined
+
+- name: 임시 파일 정리 (repo secret)
+  file:
+    path: /tmp/argocd-repo-secret.yaml
+    state: absent
+
+- name: registry_token 미제공 시 안내
+  debug:
+    msg: |
+      ⚠️ registry_token이 제공되지 않아 repo 인증 등록을 건너뜁니다.
+      재실행: ansible-playbook site.yml -e registry_token=<TOKEN>
+  when: registry_token is not defined
+
+- name: ArgoCD Application 매니페스트 생성
+  copy:
+    dest: /tmp/argocd-app.yaml
+    content: |
+      apiVersion: argoproj.io/v1alpha1
+      kind: Application
+      metadata:
+        name: homelab
+        namespace: argocd
+      spec:
+        project: default
+        source:
+          repoURL: https://gitea.local.fresh96jwjw.org/jw/homelab-infra.git
+          targetRevision: HEAD
+          path: k8s
+        destination:
+          server: https://kubernetes.default.svc
+          namespace: default
+        syncPolicy:
+          automated:
+            prune: true
+            selfHeal: true
+          syncOptions:
+          - CreateNamespace=true
+    mode: "0644"
+
+- name: ArgoCD Application 배포
+  command: kubectl apply -f /tmp/argocd-app.yaml
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: 임시 파일 정리 (app)
+  file:
+    path: /tmp/argocd-app.yaml
+    state: absent
+
+- name: ArgoCD 초기 비밀번호 확인
+  shell: >
+    kubectl -n argocd get secret argocd-initial-admin-secret
+    -o jsonpath="{.data.password}" | base64 -d
+  register: argocd_password
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  changed_when: false
+
+- name: ArgoCD 접속 정보 출력
+  debug:
+    msg: |
+      ========================================
+      ArgoCD 설치 완료!
+
+      URL: https://argocd.local.fresh96jwjw.org
+      User: admin
+      Password: {{ argocd_password.stdout }}
+      ========================================

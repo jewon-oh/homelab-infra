@@ -1,0 +1,86 @@
+# Kyverno 정책 엔진 — admission 시점에 매니페스트 정책 강제/감사 (#52)
+#
+# 초기는 모든 정책 validationFailureAction:Audit — audit log 만, 거절 안 함.
+# 운영 30일 안정 + audit 위반 0 확인 후 정책별 Enforce 전환.
+#
+# 정책 정의는 별 ArgoCD App (kyverno-policies-app.yaml) — 본 chart 와 분리.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://kyverno.github.io/kyverno/
+    targetRevision: 3.3.7  # 2026-05 기준 stable
+    chart: kyverno
+    helm:
+      releaseName: kyverno
+      values: |
+        admissionController:
+          replicas: 2
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: node-role.kubernetes.io/ops
+                        operator: Exists
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    labelSelector:
+                      matchLabels:
+                        app.kubernetes.io/component: admission-controller
+                    topologyKey: kubernetes.io/hostname
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { memory: 512Mi }
+
+        backgroundController:
+          replicas: 1
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: node-role.kubernetes.io/ops
+                        operator: Exists
+
+        cleanupController:
+          replicas: 1
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: node-role.kubernetes.io/ops
+                        operator: Exists
+
+        reportsController:
+          replicas: 1
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: node-role.kubernetes.io/ops
+                        operator: Exists
+
+        # CRD 정의 보존 — Application prune 시 정책 CRD 사라지면 모든 정책 소실
+        config:
+          excludeKyvernoNamespace: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

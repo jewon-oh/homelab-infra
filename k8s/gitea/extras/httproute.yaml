@@ -1,0 +1,27 @@
+# Gitea HTTPRoute — Envoy Gateway 를 통해 외부 노출
+# Gateway-API admission 이 자동 채우는 기본값들 (parentRefs[].group/kind,
+# backendRefs[].group/kind/weight, matches[]) 도 명시해 argocd OutOfSync 회피.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gitea
+  namespace: gitea
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: internal-gateway
+      namespace: default
+  hostnames:
+    - "gitea.local.fresh96jwjw.org"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: gitea-http
+          port: 3000
+          weight: 1

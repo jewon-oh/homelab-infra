@@ -1,0 +1,122 @@
+# K3s 워커 조인 역할 (Proxmox VM & 베어메탈 공용)
+# VIP(kube-vip) 주소로 API 서버에 조인
+---
+- name: 시스템 업데이트
+  apt:
+    update_cache: true
+    upgrade: safe
+
+- name: 필수 패키지 설치
+  apt:
+    name:
+      - curl
+      - ca-certificates
+      - open-iscsi          # Longhorn 스토리지용
+      - nfs-common           # NFS PV 마운트용
+      - util-linux           # Longhorn 의존성
+    state: present
+
+- name: QEMU Guest Agent 설치 (VM 한정)
+  apt:
+    name: qemu-guest-agent
+    state: present
+  when: ansible_virtualization_role == "guest"
+
+- name: qemu-guest-agent 활성화 (VM 한정)
+  systemd:
+    name: qemu-guest-agent
+    state: started
+    enabled: true
+  when: ansible_virtualization_role == "guest"
+
+- name: iscsid 서비스 활성화 (Longhorn용)
+  systemd:
+    name: iscsid
+    state: started
+    enabled: true
+
+- name: 서버에서 토큰 가져오기
+  slurp:
+    src: /var/lib/rancher/k3s/server/node-token
+  register: k3s_token_raw
+  delegate_to: "{{ groups['k3s_server'][0] }}"
+
+- name: 토큰 파싱
+  set_fact:
+    k3s_token: "{{ k3s_token_raw.content | b64decode | trim }}"
+
+- name: K3s agent 설치 (VIP로 조인)
+  shell: >
+    curl -sfL https://get.k3s.io |
+    INSTALL_K3S_VERSION="{{ k3s_version }}"
+    K3S_URL=https://{{ k3s_vip }}:6443
+    K3S_TOKEN={{ k3s_token }}
+    sh -
+  args:
+    creates: /usr/local/bin/k3s-agent
+
+- name: K3s agent 서비스 확인
+  systemd:
+    name: k3s-agent
+    state: started
+    enabled: true
+
+- name: K3s 설정 디렉토리 생성
+  file:
+    path: /etc/rancher/k3s
+    state: directory
+    mode: "0755"
+
+- name: Gitea Container Registry 접근 설정
+  template:
+    src: registries.yaml.j2
+    dest: /etc/rancher/k3s/registries.yaml
+    mode: "0644"
+  notify: K3s agent 재시작
+
+# ── 노드 라벨링 및 Taint 설정 ──
+- name: GPU 노드 라벨 추가
+  command: >-
+    kubectl label node {{ inventory_hostname }}
+    amd.com/gpu=true --overwrite
+  delegate_to: "{{ groups['k3s_server'][0] }}"
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  when: k3s_gpu | default(false) | bool
+
+- name: GPU 노드 Taint 추가
+  command: >-
+    kubectl taint node {{ inventory_hostname }}
+    amd.com/gpu=true:NoSchedule --overwrite
+  delegate_to: "{{ groups['k3s_server'][0] }}"
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  when: k3s_gpu | default(false) | bool
+  ignore_errors: true
+
+- name: DB 노드 라벨 추가
+  command: >-
+    kubectl label node {{ inventory_hostname }}
+    node-role.kubernetes.io/database=true --overwrite
+  delegate_to: "{{ groups['k3s_server'][0] }}"
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  when: k3s_db | default(false) | bool
+
+- name: Ops 노드 라벨 추가
+  command: >-
+    kubectl label node {{ inventory_hostname }}
+    node-role.kubernetes.io/ops=true --overwrite
+  delegate_to: "{{ groups['k3s_server'][0] }}"
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  when: k3s_ops | default(false) | bool
+
+- name: App 노드 라벨 추가
+  command: >-
+    kubectl label node {{ inventory_hostname }}
+    node-role.kubernetes.io/app=true --overwrite
+  delegate_to: "{{ groups['k3s_server'][0] }}"
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  when: k3s_app | default(false) | bool

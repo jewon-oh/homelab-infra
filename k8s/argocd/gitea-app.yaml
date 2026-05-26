@@ -1,0 +1,58 @@
+# ArgoCD Application — Gitea (Helm chart 다중-source)
+#
+# 구성:
+#   - source 1: gitea-charts/gitea Helm chart (서버 deployment, service, init secret)
+#   - source 2: homelab-infra repo의 values 파일 참조 (ref-only)
+#   - source 3: k8s/gitea/extras/ (HTTPRoute, namespace, pvc, runner-*) — chart 가 만들지 않는 매니페스트
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gitea
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    - repoURL: https://dl.gitea.com/charts/
+      chart: gitea
+      targetRevision: 12.5.3
+      helm:
+        releaseName: gitea
+        valueFiles:
+          - $values/k8s/gitea/values.yaml
+    - repoURL: https://gitea.local.fresh96jwjw.org/jw/homelab-infra.git
+      targetRevision: main
+      ref: values
+    - repoURL: https://gitea.local.fresh96jwjw.org/jw/homelab-infra.git
+      targetRevision: main
+      path: k8s/gitea/extras
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gitea
+  # StatefulSet 의 k8s API server admission 기본값들 — source 에 명시하기보다
+  # ignoreDifferences 로 처리. 라이브 동작과 무관한 cosmetic 차이만.
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      name: gitea-runner
+      namespace: gitea
+      jqPathExpressions:
+        - '.spec.volumeClaimTemplates[].apiVersion'
+        - '.spec.volumeClaimTemplates[].kind'
+        - '.spec.volumeClaimTemplates[].metadata.creationTimestamp'
+        - '.spec.volumeClaimTemplates[].spec.volumeMode'
+        - '.spec.volumeClaimTemplates[].status'
+        - '.spec.template.spec.containers[].imagePullPolicy'
+        - '.spec.template.spec.containers[].terminationMessagePath'
+        - '.spec.template.spec.containers[].terminationMessagePolicy'
+        - '.spec.template.spec.dnsPolicy'
+        - '.spec.template.spec.restartPolicy'
+        - '.spec.template.spec.schedulerName'
+        - '.spec.template.spec.terminationGracePeriodSeconds'
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true

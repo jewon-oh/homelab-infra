@@ -1,0 +1,14 @@
+---
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: gitea-s3-packages
+  namespace: gitea
+spec:
+  encryptedData:
+    storage.gitea-packages: AgBUNl/yrKFyTa5old+GADDjDqgHOO4r0fIMIKmg60NI3gPJDhusOYyE4ShrP/amdDB5sqH7KYc1Yo+NmEa6GX67NnRs/x6KoyIcCW6moejH4xDQ39nomfNIqgaBNu4xZ58l5T86wzb2ZPVeQC+XZZqX+im1LUxefB1jFzsmUgaZ02QTuLNtNSuIyb4LqfbrWIr8yTLYUcO4XI8zC1ymiyIAoifHalP0k4aqv6/l6jCl9eFvIJg/tiABWcnHm0P8XTrx26xmotopkVOlmt4jWEY+olt+mHNS5C6tCdlK4G4sSh3oiAEQ1fLFaz/+APzLVciVTqkGjVqP5VDBrM0DhuNaguEhrQ8LJ/OZBe7XGCFzGBfwsu4gEO1ifR9J3OJlBhIvgKiaDZt/+Ryd4Ttw1eZtIf8lY2rEKboiBdlEjOGAhJj4eBs1Pa/qaDQWoOyytXNhPrWUch3LsORB/ZpWmNQ2E4CMxx69fEy1Bmz2gnX0E+felZoOxpzHHbh0JWGa6pESMqhtHzkIMhSjVah7IK99ouBwn8EKH/joZmMe7/dIv5xQAhxqrMOlWL/U/VD84Bs4Kfv+2FA/JK7gTIs7wKjz13Mlo3kXtxTRbEN3Vt2ybSoAoCRW1FWG6dP+EJknA+ajtp/tzyleHw1Fp7zGaKBCxrTt/kzBfq5Cxrhfpwyi9/EJmDIDK0icxWTYdjVRV5HFzE3Pcdrm9tSRqxi59Ll+Jr8wK5Q9kRwshAGrlpfLFlErpmLanBGKI0NzJMkLnCOu7iSjbU4I+QDqQdmBjPWyQI6sipStAlpJcAFAL9ki8rqzL5oZCqTevW+5jbLEGeR3GYHUwyjs0bhI+A/nlTdK8o8ff/DAU9u1Y6lVtlkFKKAQXsvJ7gQHbzQdSiJ/hzyGWZOJu9KJWXVOcKeW2ah5yyawBazSKLGyE39XtVR1fvtKZz3JHpf+ORyvz7GCZII5ET5SAOHvSe97W6XAdwzBka4HTYgmCyyRt1tHbNEKBJcZ05kVSqMBpOJDCJFpbqzDfd6jhakVyYR0YzegpebbInis
+  template:
+    metadata:
+      name: gitea-s3-packages
+      namespace: gitea
+    type: Opaque
